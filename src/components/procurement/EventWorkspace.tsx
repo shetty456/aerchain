@@ -7,6 +7,7 @@ import type { SourcingEvent } from '@/lib/procurement/schemas';
 import ComparisonWorkspace from './ComparisonWorkspace';
 import AnalysisWorkspace from './AnalysisWorkspace';
 import AuditTrail from './AuditTrail';
+import ArtifactViewer, { type ArtifactViewerTarget } from './ArtifactViewer';
 
 type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis';
 type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
@@ -205,18 +206,20 @@ function RfxView({ event, expanded, setExpanded, aiConfigured, sent, sendRfx }: 
 }
 
 function ResponsesView({ event, sent, running, replaying, progress, aiConfigured, sendRfx, retry, startFresh }: { event: SourcingEvent; sent: boolean; running: boolean; replaying: boolean; progress: Record<string, VendorProgress>; aiConfigured: boolean; sendRfx: () => void; retry: (vendorId: string) => Promise<void>; startFresh: () => Promise<void> }) {
+  const [attachment, setAttachment] = useState<ArtifactViewerTarget | null>(null);
   if (!sent) return <div className="mx-auto flex min-h-[62vh] max-w-md items-center justify-center text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Send size={18} /></div><h1 className="mt-4 text-xl font-semibold">Send the RFx to begin</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Five simulated vendor responses will arrive and be converted into comparable procurement data.</p><button disabled={!aiConfigured} onClick={sendRfx} className="mt-5 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Send RFx to 5 vendors</button></div></div>;
   const complete = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
   const errors = Object.values(progress).filter((item) => item.state === 'ERROR').length;
   return <div className="mx-auto max-w-5xl">
     <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-xl font-semibold sm:text-2xl">{running ? (replaying ? 'Replaying the response journey' : 'Processing vendor responses') : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{running ? (replaying ? 'Using saved results only · no AI requests or tokens' : 'Responses are processed one vendor at a time and checkpointed after every successful stage.') : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="flex items-end gap-4"><button disabled={!aiConfigured || running} onClick={() => void startFresh()} className="rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold disabled:opacity-45">Start fresh live run</button><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div></div>
-    <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">{event.invitedVendors.map((vendor, index) => <VendorResponseRow key={vendor.id} vendor={vendor} progress={progress[vendor.id]} index={index} retry={() => retry(vendor.id)} retryDisabled={running} />)}</div>
+    <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">{event.invitedVendors.map((vendor, index) => <VendorResponseRow key={vendor.id} vendor={vendor} progress={progress[vendor.id]} index={index} retry={() => retry(vendor.id)} retryDisabled={running} onView={() => setAttachment({ vendorId: vendor.id, vendorName: vendor.name, responseFormat: vendor.responseFormat })} />)}</div>
     <AuditTrail active={running} />
     <div className="mt-4 flex items-start gap-3 rounded-xl border border-[var(--line)] bg-white p-4"><ShieldCheck className="mt-0.5 shrink-0 text-[var(--green)]" size={16} /><div><p className="text-xs font-semibold">Each result remains inspectable</p><p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">Original values, normalization assumptions, exceptions, and source evidence will remain attached when these responses enter comparison.</p></div></div>
+    {attachment && <ArtifactViewer target={attachment} onClose={() => setAttachment(null)} />}
   </div>;
 }
 
-function VendorResponseRow({ vendor, progress, index, retry, retryDisabled }: { vendor: SourcingEvent['invitedVendors'][number]; progress: VendorProgress; index: number; retry: () => void; retryDisabled: boolean }) {
+function VendorResponseRow({ vendor, progress, index, retry, retryDisabled, onView }: { vendor: SourcingEvent['invitedVendors'][number]; progress: VendorProgress; index: number; retry: () => void; retryDisabled: boolean; onView: () => void }) {
   const status = {
     WAITING: { label: 'Waiting', detail: 'Response queued', icon: <Circle size={15} />, className: 'text-[var(--muted)]' },
     PROCESSING: { label: progress.stage === 'EXTRACTING' ? 'Extracting document' : progress.stage === 'MAPPING' ? 'Mapping response' : 'Normalizing prices', detail: progress.stage === 'EXTRACTING' ? 'Reading the supplier file' : progress.stage === 'MAPPING' ? 'Matching quoted items to RFx lines' : 'Applying deterministic pricing rules', icon: <LoaderCircle className="animate-spin" size={15} />, className: 'text-[var(--ink)]' },
@@ -228,7 +231,7 @@ function VendorResponseRow({ vendor, progress, index, retry, retryDisabled }: { 
     <div><p className="text-xs font-semibold">{vendor.name}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{vendor.contactName}</p></div>
     <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]"><FileText size={13} /> {vendor.responseFormat}</div>
     <div className={`flex items-start gap-2 ${status.className}`}>{status.icon}<div><p className="text-xs font-semibold">{status.label}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--muted)]">{status.detail}</p></div></div>
-    {progress.state === 'ERROR' ? <button disabled={retryDisabled} onClick={retry} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-45"><RefreshCw size={12} /> Retry</button> : progress.state === 'WAITING' ? <Clock3 size={14} className="text-[var(--muted-light)]" /> : <span />}
+    {progress.state === 'ERROR' ? <button disabled={retryDisabled} onClick={retry} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-45"><RefreshCw size={12} /> Retry</button> : progress.state === 'WAITING' ? <Clock3 size={14} className="text-[var(--muted-light)]" /> : progress.state === 'COMPLETE' ? <button onClick={onView} className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold">View response</button> : <span />}
   </div>;
 }
 

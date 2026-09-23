@@ -101,3 +101,7 @@ export async function getArtifactFingerprint(artifact: ArtifactDefinition) {
   const bytes = await readFile(path.join(artifactDirectory, artifact.fileName));
   return createHash('sha256').update(bytes).digest('hex');
 }
+
+export function readArtifactBytes(artifact: ArtifactDefinition) {
+  return readFile(path.join(artifactDirectory, artifact.fileName));
+}
