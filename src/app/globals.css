@@ -25,6 +25,8 @@ body {
 
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-light); }
 .status-pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--surface); }
 .status-ready { border-color: #cae4d8; color: var(--green); background: var(--green-soft); }
@@ -35,18 +37,3 @@ button { cursor: pointer; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #e0e0dc; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #c9c9c5; }
-
-@keyframes toast-up {
-  from { transform: translate(-50%, 10px); opacity: 0; }
-  to   { transform: translate(-50%, 0);    opacity: 1; }
-}
-.animate-toast { animation: toast-up 0.18s ease-out both; }
-
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.2, 0, 0, 1) both; }
-.animate-fade-up-delay-1 { animation: fade-up 0.5s 0.08s cubic-bezier(0.2, 0, 0, 1) both; }
-.animate-fade-up-delay-2 { animation: fade-up 0.5s 0.16s cubic-bezier(0.2, 0, 0, 1) both; }
-.animate-fade-up-delay-3 { animation: fade-up 0.5s 0.24s cubic-bezier(0.2, 0, 0, 1) both; }
