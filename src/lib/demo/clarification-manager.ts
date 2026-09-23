@@ -113,11 +113,17 @@ async function executeClarification(vendorId: string) {
     const validQuestionIds = new Set(windowsHardwareEvent.qualificationQuestions.map((question) => question.id));
     const alreadyAnswered = new Set(previousQualificationResolutions.filter((item) => item.answer !== 'UNKNOWN').map((item) => item.questionId));
     const answerByQuestion = new Map(response.qualificationAnswers.map((answer) => [answer.questionId, answer.answer]));
-    const qualificationIssues: ClarificationIssue[] = windowsHardwareEvent.qualificationQuestions
+    const hardGateQuestions = windowsHardwareEvent.qualificationQuestions.filter((question) => question.hardGate);
+    const failedHardGates = hardGateQuestions.filter((question) => answerByQuestion.get(question.id) === 'NO');
+    if (failedHardGates.length) throw new Error(`Supplier explicitly failed mandatory qualification: ${failedHardGates.map((question) => question.label).join(', ')}. Buyer review is required; autonomous clarification is stopped.`);
+    const hardGateIssues: ClarificationIssue[] = hardGateQuestions
       .filter((question) => !alreadyAnswered.has(question.id) && (!answerByQuestion.has(question.id) || answerByQuestion.get(question.id) === 'UNKNOWN'))
       .map((question) => ({ kind: 'QUALIFICATION' as const, id: question.id, issue: question.description }));
+    const optionalQualificationIssues: ClarificationIssue[] = windowsHardwareEvent.qualificationQuestions
+      .filter((question) => !question.hardGate && !alreadyAnswered.has(question.id) && (!answerByQuestion.has(question.id) || answerByQuestion.get(question.id) === 'UNKNOWN'))
+      .map((question) => ({ kind: 'QUALIFICATION' as const, id: question.id, issue: question.description }));
     const lineIssues: ClarificationIssue[] = [...uniqueIssues].map(([lineId, issue]) => ({ kind: 'LINE' as const, id: lineId, issue }));
-    const issues = [...qualificationIssues, ...lineIssues].slice(0, 3);
+    const issues = hardGateIssues.length ? hardGateIssues.slice(0, 3) : [...optionalQualificationIssues, ...lineIssues].slice(0, 3);
     if (!issues.length) throw new Error('This vendor has no factual gaps available for autonomous clarification.');
 
     const question = await procurementAiProvider.generateStructured({
