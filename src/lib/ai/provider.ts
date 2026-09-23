@@ -34,7 +34,11 @@ export class AiConfigurationError extends Error {
 }
 
 export class AiProviderError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+    public readonly code: 'TIMEOUT' | 'PROVIDER_ERROR' | 'INVALID_OUTPUT' = 'PROVIDER_ERROR',
+  ) {
     super(message);
     this.name = 'AiProviderError';
   }

@@ -7,6 +7,7 @@ import { sarvamProvider } from '@/lib/ai/sarvam';
 import { extractSource, getArtifactForVendor } from './source-artifacts';
 import { normalizeResponse } from './canonicalize';
 import { rawExtractedResponseSchema } from '@/lib/procurement/schemas';
+import { elapsedSince, procurementLog } from '@/lib/observability/logger';
 
 function mapPrompt(source: string, fileName: string, artifactId: string) {
   const rfx = windowsHardwareEvent.lineItems.map((line) => ({
@@ -36,16 +37,29 @@ Vendor source:
 ${source}`;
 }
 
-export async function processVendorResponse(vendorId: string, provider: AiProvider = sarvamProvider) {
+export async function processVendorResponse(vendorId: string, provider: AiProvider = sarvamProvider, requestId = crypto.randomUUID()) {
+  const startedAt = Date.now();
   const artifact = getArtifactForVendor(vendorId);
+  procurementLog.info('vendor.processing.started', { requestId, vendorId, artifactId: artifact.id, fileName: artifact.fileName, kind: artifact.kind });
+  const extractionStartedAt = Date.now();
   const source = await extractSource(artifact, provider);
+  procurementLog.info('vendor.extraction.completed', { requestId, vendorId, method: source.extractionMethod, visionJobId: source.visionJobId, sourceCharacters: source.content.length, elapsedMs: elapsedSince(extractionStartedAt) });
+  const mappingStartedAt = Date.now();
   const raw = await provider.generateStructured({
     schemaName: 'vendor_response_extraction',
     schema: rawExtractedResponseSchema,
     system: PROCUREMENT_GUARDRAIL,
     prompt: mapPrompt(source.content, artifact.fileName, artifact.id),
   });
+  procurementLog.info('vendor.mapping.validated', { requestId, vendorId, extractedLines: raw.lineItems.length, ambiguityCount: raw.ambiguities.length, elapsedMs: elapsedSince(mappingStartedAt) });
+  const normalizationStartedAt = Date.now();
   const response = normalizeResponse(vendorId, artifact.id, raw);
+  procurementLog.info('vendor.normalization.completed', {
+    requestId, vendorId, totalLines: response.lineItems.length,
+    normalizedLines: response.lineItems.filter((line) => line.normalizedUnitPrice !== null).length,
+    exceptionLines: response.lineItems.filter((line) => !['VERIFIED', 'NORMALIZED'].includes(line.status)).length,
+    elapsedMs: elapsedSince(normalizationStartedAt), totalElapsedMs: elapsedSince(startedAt),
+  });
   return {
     response,
     ingestion: {
