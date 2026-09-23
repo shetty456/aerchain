@@ -6,6 +6,7 @@ import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronDown, Circle, Circl
 import type { SourcingEvent } from '@/lib/procurement/schemas';
 import ComparisonWorkspace from './ComparisonWorkspace';
 import AnalysisWorkspace from './AnalysisWorkspace';
+import AuditTrail from './AuditTrail';
 
 type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis';
 type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
@@ -167,6 +168,7 @@ function ResponsesView({ event, sent, running, replaying, progress, aiConfigured
   return <div className="mx-auto max-w-5xl">
     <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-2xl font-semibold">{running ? (replaying ? 'Replaying the response journey' : 'Processing vendor responses') : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm text-[var(--muted)]">{running ? (replaying ? 'Using saved results only · no AI requests or tokens' : 'Responses are processed one vendor at a time to stay within provider limits.') : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div>
     <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">{event.invitedVendors.map((vendor, index) => <VendorResponseRow key={vendor.id} vendor={vendor} progress={progress[vendor.id]} index={index} retry={() => retry(vendor.id)} retryDisabled={running} />)}</div>
+    <AuditTrail active={running} />
     <div className="mt-4 flex items-start gap-3 rounded-xl border border-[var(--line)] bg-white p-4"><ShieldCheck className="mt-0.5 shrink-0 text-[var(--green)]" size={16} /><div><p className="text-xs font-semibold">Each result remains inspectable</p><p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">Original values, normalization assumptions, exceptions, and source evidence will remain attached when these responses enter comparison.</p></div></div>
   </div>;
 }

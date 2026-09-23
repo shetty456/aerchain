@@ -21,6 +21,7 @@ export type DemoRunState = {
     cached?: boolean;
     error?: string;
     updatedAt: string;
+    history?: Array<{ status: DemoVendorStatus; at: string }>;
   }>;
   replayResults?: Record<string, {
     normalizedLines: number;
@@ -60,7 +61,14 @@ async function updateVendor(runId: string, vendorId: string, update: Partial<Dem
   const state = await readState();
   if (!state || state.runId !== runId) return;
   const now = new Date().toISOString();
-  state.vendors[vendorId] = { ...state.vendors[vendorId], ...update, updatedAt: now };
+  const current = state.vendors[vendorId];
+  const nextStatus = update.status ?? current.status;
+  state.vendors[vendorId] = {
+    ...current,
+    ...update,
+    updatedAt: now,
+    history: nextStatus === current.status ? current.history : [...(current.history ?? []), { status: nextStatus, at: now }],
+  };
   state.updatedAt = now;
   await writeState(state);
 }
@@ -158,7 +166,7 @@ export async function startDemoRun() {
     status: 'RUNNING',
     createdAt: now,
     updatedAt: now,
-    vendors: Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => [vendor.id, { status: 'QUEUED', updatedAt: now }])),
+    vendors: Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => [vendor.id, { status: 'QUEUED', updatedAt: now, history: [{ status: 'QUEUED', at: now }] }])),
   };
   await writeState(state);
   launchWorker(state.runId);
@@ -190,7 +198,7 @@ export async function replayDemoRun() {
     status: 'RUNNING',
     createdAt: now,
     updatedAt: now,
-    vendors: Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => [vendor.id, { status: 'QUEUED', updatedAt: now }])),
+    vendors: Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => [vendor.id, { status: 'QUEUED', updatedAt: now, history: [{ status: 'QUEUED', at: now }] }])),
     replayResults,
   };
   await writeState(state);
