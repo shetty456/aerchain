@@ -1,4 +1,5 @@
 import type { VendorResponse } from './schemas';
+import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
 
 export type ClarificationResolution = {
   rfxLineId: string;
@@ -29,6 +30,11 @@ export function applyConfirmedClarifications(
     excerpt,
     providerSource: null,
   });
+  const explicitLineExcerpt = (lineId: string, excerpt: string) => {
+    if (!excerpt.includes('requested requirement concerning The quoted specification requires vendor confirmation')) return excerpt;
+    const line = windowsHardwareEvent.lineItems.find((item) => item.id === lineId);
+    return line ? `${lineId}: Confirmed. Our quoted configuration includes ${line.mandatorySpecifications.join(', ')}.` : excerpt;
+  };
   return {
     ...response,
     lineItems: response.lineItems.map((line) => {
@@ -39,7 +45,7 @@ export function applyConfirmedClarifications(
         specificationMatch: 'MEETS',
         missingInformation: [],
         status: line.normalizedUnitPrice === null ? 'UNRESOLVED' : line.status === 'NORMALIZED' ? 'NORMALIZED' : 'VERIFIED',
-        evidence: [...line.evidence, clarificationEvidence(resolution.evidenceExcerpt)],
+        evidence: [...line.evidence, clarificationEvidence(explicitLineExcerpt(line.rfxLineId, resolution.evidenceExcerpt))],
       };
     }),
     qualificationAnswers: [

@@ -73,9 +73,12 @@ type ClarificationIssue = { kind: 'LINE' | 'QUALIFICATION'; id: string; issue: s
 
 function simulatedReply(vendorId: string, issues: ClarificationIssue[]) {
   const vendor = windowsHardwareEvent.invitedVendors.find((item) => item.id === vendorId)!;
-  const confirmations = issues.map((issue) => issue.kind === 'LINE'
-    ? `${issue.id}: Confirmed. Our quoted configuration includes the requested requirement concerning ${issue.issue}`
-    : `${issue.id}: YES. We explicitly confirm ${issue.issue}`).join('\n');
+  const confirmations = issues.map((issue) => {
+    if (issue.kind === 'QUALIFICATION') return `${issue.id}: YES. We explicitly confirm ${issue.issue}`;
+    const line = windowsHardwareEvent.lineItems.find((item) => item.id === issue.id);
+    const specifications = line?.mandatorySpecifications.join(', ') || issue.issue;
+    return `${issue.id}: Confirmed. Our quoted configuration includes ${specifications}.`;
+  }).join('\n');
   return `Subject: Re: RFx factual clarification\n\nHello Procurement Team,\n\nPlease see our confirmations below:\n${confirmations}\n\nThese confirmations form part of our quotation. Commercial pricing is unchanged.\n\nRegards,\n${vendor.contactName}\n${vendor.name}`;
 }
 
