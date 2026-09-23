@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronDown, Circle, CircleHelp, Clock3, FileText, LoaderCircle, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import type { SourcingEvent } from '@/lib/procurement/schemas';
+import ComparisonWorkspace from './ComparisonWorkspace';
 
 type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis';
 type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
@@ -111,7 +112,8 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
       {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
       {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} />}
-      {(tab === 'Comparison' || tab === 'Analysis') && <EmptyTab tab={tab} />}
+      {tab === 'Comparison' && (completedCount ? <ComparisonWorkspace /> : <EmptyTab tab="Comparison" />)}
+      {tab === 'Analysis' && <EmptyTab tab="Analysis" />}
     </main>
   </div>;
 }
