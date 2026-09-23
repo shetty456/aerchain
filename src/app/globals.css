@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+/* Subtle scrollbar — Notion style */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e0e0dc; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #c9c9c5; }
+
+@keyframes toast-up {
+  from { transform: translate(-50%, 10px); opacity: 0; }
+  to   { transform: translate(-50%, 0);    opacity: 1; }
+}
+.animate-toast { animation: toast-up 0.18s ease-out both; }
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.2, 0, 0, 1) both; }
+.animate-fade-up-delay-1 { animation: fade-up 0.5s 0.08s cubic-bezier(0.2, 0, 0, 1) both; }
+.animate-fade-up-delay-2 { animation: fade-up 0.5s 0.16s cubic-bezier(0.2, 0, 0, 1) both; }
+.animate-fade-up-delay-3 { animation: fade-up 0.5s 0.24s cubic-bezier(0.2, 0, 0, 1) both; }
