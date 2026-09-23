@@ -49,7 +49,7 @@ export const qualificationAnswerSchema = z.object({
   questionId: z.string(),
   answer: z.enum(['YES', 'NO', 'UNKNOWN']),
   detail: z.string().nullable(),
-  evidence: sourceEvidenceSchema.nullable(),
+  evidence: z.array(sourceEvidenceSchema),
 });
 
 export const commercialTermsSchema = z.object({

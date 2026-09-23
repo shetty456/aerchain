@@ -1,9 +1,10 @@
 import 'server-only';
 
-import Groq from 'groq-sdk';
+import Groq, { APIError } from 'groq-sdk';
 import { z } from 'zod';
 import { AiConfigurationError, AiProviderError, type StructuredGenerationRequest } from './provider';
 import { elapsedSince, procurementLog } from '@/lib/observability/logger';
+import { recoverFailedGeneration } from './structured-recovery';
 
 function getClient() {
   const apiKey = process.env.GROQ_API_KEY?.trim();
@@ -54,6 +55,28 @@ export class GroqReasoningProvider {
       return parsed;
     } catch (error) {
       if (error instanceof AiConfigurationError) throw error;
+      if (error instanceof APIError) {
+        const body = error.error as { failed_generation?: string | null; error?: { failed_generation?: string | null } } | undefined;
+        const failedGeneration = body?.failed_generation ?? body?.error?.failed_generation;
+        if (failedGeneration) {
+          try {
+            const recovered = recoverFailedGeneration(failedGeneration, request.schema);
+            procurementLog.warn('groq.mapping.recovered_failed_generation', {
+              schema: request.schemaName,
+              model,
+              contentCharacters: failedGeneration.length,
+              elapsedMs: elapsedSince(startedAt),
+            });
+            return recovered;
+          } catch (recoveryError) {
+            procurementLog.error('groq.mapping.recovery_failed', {
+              schema: request.schemaName,
+              model,
+              error: recoveryError instanceof Error ? recoveryError.message : 'Unknown recovery error',
+            });
+          }
+        }
+      }
       if (error instanceof z.ZodError) {
         procurementLog.error('groq.mapping.invalid_output', { schema: request.schemaName, issueCount: error.issues.length, elapsedMs: elapsedSince(startedAt) });
         throw new AiProviderError('Groq returned structured output that failed schema validation.', error, 'INVALID_OUTPUT');

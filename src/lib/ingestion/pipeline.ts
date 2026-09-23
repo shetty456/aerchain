@@ -12,7 +12,7 @@ import { elapsedSince, procurementLog } from '@/lib/observability/logger';
 import { readPipelineStage, writePipelineStage } from '@/lib/storage/pipeline-cache';
 import { z } from 'zod';
 
-const PIPELINE_SCHEMA_VERSION = 'vendor-response-v2';
+const PIPELINE_SCHEMA_VERSION = 'vendor-response-v3';
 const extractedSourceCacheSchema = z.object({
   artifact: z.object({ id: z.string(), vendorId: z.string(), kind: z.enum(['XLSX', 'PDF', 'DOCX', 'IMAGE', 'EMAIL']), fileName: z.string() }),
   content: z.string(),

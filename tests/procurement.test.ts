@@ -30,8 +30,8 @@ test('keeps unknown hard-gate qualification incomplete rather than failed', () =
   const response = vendorResponseSchema.parse({
     vendorId: 'vendor-c', artifactId: 'artifact-c', processedAt: new Date().toISOString(), lineItems: [],
     qualificationAnswers: [
-      { questionId: 'warranty', answer: 'YES', detail: null, evidence: null },
-      { questionId: 'delivery', answer: 'YES', detail: null, evidence: null },
+      { questionId: 'warranty', answer: 'YES', detail: null, evidence: [] },
+      { questionId: 'delivery', answer: 'YES', detail: null, evidence: [] },
     ],
     commercialTerms: { currency: 'INR', freight: 'UNKNOWN', tax: 'UNKNOWN', paymentTerms: null, deliveryLeadTimeDays: null, warrantyMonths: null, quoteValidityDays: null, discountPercent: null, minimumOrderCondition: null, evidence: [] },
     ambiguities: [], clarificationRequired: true,
