@@ -6,6 +6,8 @@ import { getQualificationStatus } from '../src/lib/procurement/qualification';
 import { vendorResponseSchema, type RawExtractedResponse } from '../src/lib/procurement/schemas';
 import { rawExtractedResponseSchema } from '../src/lib/procurement/schemas';
 import { z } from 'zod';
+import { windowsHardwareEvent } from '../src/data/windows-hardware-fy27';
+import { analyzeProcurement, type AnalysisVendor } from '../src/lib/procurement/analysis';
 
 function assertStrictObjects(node: unknown, location = '$') {
   if (!node || typeof node !== 'object') return;
@@ -58,4 +60,24 @@ test('adds missing RFx lines and applies commercial discount in code', () => {
   assert.equal(response.lineItems[0].normalizedUnitPrice, 95_500);
   assert.equal(response.lineItems[0].status, 'AWAITING_CLARIFICATION');
   assert.equal(response.lineItems[1].status, 'MISSING');
+});
+
+test('analysis filters lines before performing deterministic calculations', () => {
+  const selectedLines = windowsHardwareEvent.lineItems.slice(0, 2);
+  const response = vendorResponseSchema.parse({
+    vendorId: 'vendor-a', artifactId: 'artifact-a', processedAt: new Date().toISOString(),
+    lineItems: selectedLines.map((line, index) => ({
+      rfxLineId: line.id, matchStatus: 'MATCHED', quotedDescription: line.requestedProduct,
+      quotedQuantity: line.quantity, rawPrice: 1000 + index, normalizedUnitPrice: 1000 + index,
+      rawCurrency: 'INR', normalizedCurrency: 'INR', rawUnit: line.unit, normalizedUnit: line.unit,
+      specificationMatch: 'MEETS', specificationDeviations: [], missingInformation: [], status: 'VERIFIED', evidence: [],
+    })),
+    qualificationAnswers: [],
+    commercialTerms: { currency: 'INR', freight: 'INCLUDED', tax: 'EXCLUDED', paymentTerms: null, deliveryLeadTimeDays: null, warrantyMonths: null, quoteValidityDays: null, discountPercent: null, minimumOrderCondition: null, evidence: [] },
+    ambiguities: [], clarificationRequired: false,
+  });
+  const vendors: AnalysisVendor[] = [{ id: 'vendor-a', name: 'Nexora', qualification: 'QUALIFIED', response }];
+  const result = analyzeProcurement({ operation: 'LINE_DETAIL', lineIds: [selectedLines[1].id], limit: 5 }, selectedLines, vendors) as { scope: { lineCount: number }; lines: Array<{ lineId: string }> };
+  assert.equal(result.scope.lineCount, 1);
+  assert.equal(result.lines[0].lineId, selectedLines[1].id);
 });
