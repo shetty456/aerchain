@@ -10,6 +10,7 @@ export type DemoVendorStatus = 'QUEUED' | VendorProcessingStage | 'READY' | 'FAI
 export type DemoRunState = {
   runId: string;
   eventId: string;
+  mode?: 'LIVE' | 'SHOWCASE_REPLAY';
   status: 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_ERRORS';
   createdAt: string;
   updatedAt: string;
@@ -20,6 +21,10 @@ export type DemoRunState = {
     cached?: boolean;
     error?: string;
     updatedAt: string;
+  }>;
+  replayResults?: Record<string, {
+    normalizedLines: number;
+    exceptionLines: number;
   }>;
 };
 
@@ -94,9 +99,46 @@ async function executeRun(runId: string, vendorIds = windowsHardwareEvent.invite
   procurementLog.info('demo.run.completed', { runId, status: state.status });
 }
 
-function launchWorker(runId: string, vendorIds?: string[]) {
+const replayPause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function executeShowcaseReplay(runId: string) {
+  procurementLog.info('demo.replay.started', { runId });
+  for (const vendor of windowsHardwareEvent.invitedVendors) {
+    const current = await readState();
+    if (!current || current.runId !== runId) return;
+    if (current.vendors[vendor.id]?.status === 'READY') continue;
+    const saved = current.replayResults?.[vendor.id];
+    if (!saved) {
+      await updateVendor(runId, vendor.id, { status: 'FAILED', error: 'No saved showcase result is available.' });
+      continue;
+    }
+    await updateVendor(runId, vendor.id, { status: 'EXTRACTING', error: undefined });
+    await replayPause(500);
+    await updateVendor(runId, vendor.id, { status: 'MAPPING' });
+    await replayPause(650);
+    await updateVendor(runId, vendor.id, { status: 'NORMALIZING' });
+    await replayPause(450);
+    await updateVendor(runId, vendor.id, {
+      status: 'READY',
+      normalizedLines: saved.normalizedLines,
+      exceptionLines: saved.exceptionLines,
+      cached: true,
+      error: undefined,
+    });
+    await replayPause(250);
+  }
+  const state = await readState();
+  if (!state || state.runId !== runId) return;
+  const failed = Object.values(state.vendors).some((vendor) => vendor.status === 'FAILED');
+  state.status = failed ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED';
+  state.updatedAt = new Date().toISOString();
+  await writeState(state);
+  procurementLog.info('demo.replay.completed', { runId, status: state.status, aiRequests: 0 });
+}
+
+function launchWorker(runId: string, vendorIds?: string[], mode: DemoRunState['mode'] = 'LIVE') {
   if (activeWorkers.has(runId)) return;
-  const worker = executeRun(runId, vendorIds)
+  const worker = (mode === 'SHOWCASE_REPLAY' ? executeShowcaseReplay(runId) : executeRun(runId, vendorIds))
     .catch((error) => procurementLog.error('demo.run.failed', { runId, error: error instanceof Error ? error.message : 'Unknown error' }))
     .finally(() => activeWorkers.delete(runId));
   activeWorkers.set(runId, worker);
@@ -105,13 +147,14 @@ function launchWorker(runId: string, vendorIds?: string[]) {
 export async function startDemoRun() {
   const existing = await readState();
   if (existing?.status === 'RUNNING') {
-    launchWorker(existing.runId);
+    launchWorker(existing.runId, undefined, existing.mode);
     return existing;
   }
   const now = new Date().toISOString();
   const state: DemoRunState = {
     runId: crypto.randomUUID(),
     eventId: windowsHardwareEvent.id,
+    mode: 'LIVE',
     status: 'RUNNING',
     createdAt: now,
     updatedAt: now,
@@ -124,7 +167,34 @@ export async function startDemoRun() {
 
 export async function getDemoRun() {
   const state = await readState();
-  if (state?.status === 'RUNNING') launchWorker(state.runId);
+  if (state?.status === 'RUNNING') launchWorker(state.runId, undefined, state.mode);
+  return state;
+}
+
+export async function replayDemoRun() {
+  const existing = await readState();
+  if (!existing) throw new Error('Process the supplier responses once before replaying the showcase.');
+  if (existing.status === 'RUNNING') throw new Error('A response journey is already running.');
+  const replayResults = Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => {
+    const result = existing.vendors[vendor.id];
+    if (result?.status !== 'READY' || result.normalizedLines === undefined || result.exceptionLines === undefined) {
+      throw new Error('A complete five-vendor result is required before replaying the showcase.');
+    }
+    return [vendor.id, { normalizedLines: result.normalizedLines, exceptionLines: result.exceptionLines }];
+  }));
+  const now = new Date().toISOString();
+  const state: DemoRunState = {
+    runId: crypto.randomUUID(),
+    eventId: windowsHardwareEvent.id,
+    mode: 'SHOWCASE_REPLAY',
+    status: 'RUNNING',
+    createdAt: now,
+    updatedAt: now,
+    vendors: Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => [vendor.id, { status: 'QUEUED', updatedAt: now }])),
+    replayResults,
+  };
+  await writeState(state);
+  launchWorker(state.runId, undefined, state.mode);
   return state;
 }
 
