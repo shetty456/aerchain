@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, Download, LoaderCircle, Trash2, User } from "lucide-react";
+import { ArrowUp, Bot, LoaderCircle, Trash2, User } from "lucide-react";
 
 const suggestions = [
   "Which vendors passed qualification?",
-  "Which vendor is cheapest overall?",
   "Show me the cheapest qualified vendor for each line item.",
-  "What items are still unresolved?",
   "How much do we save with a split award compared with giving everything to the cheapest qualified single vendor?",
 ];
 const money = new Intl.NumberFormat("en-IN", {
@@ -56,22 +54,18 @@ export default function AnalysisWorkspace() {
     }
   }
   return (
-    <div className="mx-auto max-w-5xl">
-      <div>
-        <div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Procurement analyst</p><h1 className="mt-2 text-xl font-semibold sm:text-2xl">Ask about this sourcing event</h1><p className="mt-2 text-sm text-[var(--muted)]">Ask naturally. Every number is calculated from normalized supplier responses.</p></div>{messages.length > 0 && <button onClick={() => { setMessages([]); setError(null); }} className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[10px] font-semibold text-[var(--muted)]"><Trash2 size={12} /> Clear</button>}</div>
-      </div>
-      {messages.length === 0 && <><p className="eyebrow mt-6">Try a common question</p><div className="mt-3 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap">
+    <div className="mx-auto max-w-3xl">
+      {messages.length === 0 ? <div className="flex min-h-[48vh] flex-col justify-center text-center"><div className="mx-auto flex size-10 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Bot size={17} /></div><h1 className="mt-4 text-xl font-semibold sm:text-2xl">What do you want to know?</h1><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--muted)]">Ask about suppliers, prices, exceptions, or award scenarios. Calculations use the normalized comparison—not model arithmetic.</p><div className="mx-auto mt-6 grid w-full max-w-2xl gap-2 text-left sm:grid-cols-3">
         {suggestions.map((item) => (
           <button
             key={item}
             onClick={() => void ask(item)}
-            className="shrink-0 rounded-full border border-[var(--line)] bg-white px-3 py-2 text-[11px] hover:border-[var(--line-strong)]"
+            className="rounded-xl border border-[var(--line)] bg-white p-3 text-left text-[11px] leading-5 hover:border-[var(--line-strong)]"
           >
             {item}
           </button>
         ))}
-      </div></>}
-      {messages.length > 0 && <div className="mt-6 space-y-5" aria-live="polite">{messages.map((message) => message.role === "user" ? <div key={message.id} className="flex justify-end gap-2"><div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--ink)] px-4 py-3 text-sm leading-6 text-white sm:max-w-[75%]">{message.text}</div><div className="mt-1 hidden size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ink)] text-white sm:flex"><User size={13} /></div></div> : <div key={message.id} className="flex items-start gap-2 sm:gap-3"><div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Bot size={13} /></div><ResultCard answer={message.answer} onFollowUp={(value) => void ask(value)} /></div>)}{loading && <div className="flex items-center gap-3 text-xs text-[var(--muted)]"><div className="flex size-7 items-center justify-center rounded-full border border-[var(--line)] bg-white"><LoaderCircle className="animate-spin" size={13} /></div>Calculating from normalized responses…</div>}<div ref={endRef} /></div>}
+      </div></div> : <><div className="flex items-center justify-between gap-4 border-b border-[var(--line)] pb-3"><div><p className="text-sm font-semibold">Analysis</p><p className="mt-0.5 text-[10px] text-[var(--muted)]">Answers from normalized supplier data</p></div><button onClick={() => { setMessages([]); setError(null); }} className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-semibold text-[var(--muted)] hover:bg-white"><Trash2 size={12} /> New conversation</button></div><div className="mt-5 space-y-6" aria-live="polite">{messages.map((message) => message.role === "user" ? <div key={message.id} className="flex justify-end gap-2"><div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--ink)] px-4 py-3 text-sm leading-6 text-white sm:max-w-[75%]">{message.text}</div><div className="mt-1 hidden size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ink)] text-white sm:flex"><User size={13} /></div></div> : <div key={message.id} className="flex items-start gap-2 sm:gap-3"><div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Bot size={13} /></div><ResultCard answer={message.answer} onFollowUp={(value) => void ask(value)} /></div>)}{loading && <div className="flex items-center gap-3 text-xs text-[var(--muted)]"><div className="flex size-7 items-center justify-center rounded-full border border-[var(--line)] bg-white"><LoaderCircle className="animate-spin" size={13} /></div>Calculating from normalized responses…</div>}<div ref={endRef} /></div></>}
       <div className="sticky bottom-3 z-10 mt-5 flex items-end rounded-xl border border-[var(--line-strong)] bg-white p-2 shadow-[0_8px_30px_rgba(31,35,32,0.10)]">
         <textarea
           value={question}
@@ -96,7 +90,6 @@ export default function AnalysisWorkspace() {
         </button>
       </div>
       {error && <p className="mt-3 text-xs text-[var(--red)]">{error}</p>}
-      <AwardPanel />
     </div>
   );
 }
@@ -111,7 +104,7 @@ function ResultCard({
   const result = answer.result;
   const operation = String(result.operation);
   return (
-    <section className="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-white p-4 sm:p-5">
+    <section className="min-w-0 flex-1 py-1">
       {answer.explanation?.answer && <p className="text-sm leading-6 text-[var(--ink)]">{answer.explanation.answer}</p>}
       {!answer.explanation && answer.explanationError && <p className="text-xs text-[var(--muted)]">The calculated result is available below; the AI explanation could not be generated.</p>}
       <div className={`${answer.explanation?.answer ? "mt-4" : ""} text-sm leading-6 text-[var(--muted)]`}>
@@ -256,170 +249,5 @@ function ResultTable({
         award recommendation.
       </p>
     </div>
-  );
-}
-
-type Award = {
-  status: "DRAFT" | "ACCEPTED";
-  totalSpend: number;
-  savings?: number;
-  unawardedLines: number;
-  unawardedLineIds?: string[];
-  spendByVendor: Array<{ vendor: string; spend: number; lines: number }>;
-};
-function AwardPanel() {
-  const [award, setAward] = useState<Award | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    fetch("/api/demo/award")
-      .then((response) => response.json())
-      .then((payload) => setAward(payload.award))
-      .catch(() => undefined);
-  }, []);
-  async function mutate(method: "POST" | "PUT") {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/demo/award", { method });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error);
-      setAward(payload.award);
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : "Award action failed.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function exportPdf() {
-    setExporting(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/demo/award/pdf");
-      if (!response.ok) { const payload = await response.json(); throw new Error(payload.error || "PDF export failed."); }
-      const url = URL.createObjectURL(await response.blob());
-      const link = document.createElement("a");
-      link.href = url; link.download = "windows-hardware-fy27-award-recommendation.pdf"; link.click();
-      URL.revokeObjectURL(url);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "PDF export failed."); }
-    finally { setExporting(false); }
-  }
-  return (
-    <section className="mt-6 rounded-xl border border-[var(--line-strong)] bg-white p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="eyebrow">Buyer decision</p>
-          <h2 className="mt-2 text-lg font-semibold">Award recommendation</h2>
-          <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-            Create a deterministic split-award draft, review its caveats, then
-            explicitly accept it before export.
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          {award?.status === "DRAFT" && (
-            <button
-              disabled={busy}
-              onClick={() => void mutate("POST")}
-              className="rounded-lg border border-[var(--line-strong)] px-4 py-2.5 text-xs font-semibold disabled:opacity-50"
-            >
-              Recalculate
-            </button>
-          )}
-          {!award ? (
-            <button
-              disabled={busy}
-              onClick={() => void mutate("POST")}
-              className="rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              {busy ? "Creating…" : "Create recommendation"}
-            </button>
-          ) : award.status === "DRAFT" ? (
-            <button
-              title={
-                award.unawardedLines > 0
-                  ? "Recalculate after resolving the listed lines."
-                  : undefined
-              }
-              disabled={busy || award.unawardedLines > 0}
-              onClick={() => void mutate("PUT")}
-              className="rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              {busy ? "Working…" : "Accept recommendation"}
-            </button>
-          ) : (
-            <button
-              disabled={exporting}
-              onClick={() => void exportPdf()}
-              className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white"
-            >
-              {exporting ? <LoaderCircle className="animate-spin" size={13} /> : <Download size={13} />} {exporting ? "Generating PDF…" : "Export PDF"}
-            </button>
-          )}
-        </div>
-      </div>
-      {error && <p className="mt-3 text-xs text-[var(--red)]">{error}</p>}
-      {award && (
-        <div className="mt-5 grid gap-4 border-t border-[var(--line)] pt-5 sm:grid-cols-3">
-          <div>
-            <p className="eyebrow">Recommended spend</p>
-            <p className="mt-1 text-base font-semibold">
-              {money.format(award.totalSpend)}
-            </p>
-          </div>
-          <div>
-            <p className="eyebrow">Savings</p>
-            <p className="mt-1 text-base font-semibold">
-              {award.savings === undefined
-                ? "No baseline"
-                : money.format(award.savings)}
-            </p>
-          </div>
-          <div>
-            <p className="eyebrow">Unawarded lines</p>
-            <p className="mt-1 text-base font-semibold">
-              {award.unawardedLines}
-            </p>
-          </div>
-          <div className="sm:col-span-3">
-            <table className="w-full text-left text-[11px]">
-              <thead>
-                <tr className="bg-[var(--surface)]">
-                  <th className="px-3 py-2">Vendor</th>
-                  <th className="px-3 py-2">Lines</th>
-                  <th className="px-3 py-2 text-right">Spend</th>
-                </tr>
-              </thead>
-              <tbody>
-                {award.spendByVendor.slice(0, 5).map((item) => (
-                  <tr
-                    key={item.vendor}
-                    className="border-t border-[var(--line)]"
-                  >
-                    <td className="px-3 py-2">{item.vendor}</td>
-                    <td className="px-3 py-2">{item.lines}</td>
-                    <td className="px-3 py-2 text-right">
-                      {money.format(item.spend)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {award.unawardedLines > 0 && (
-            <p className="text-xs text-amber-700 sm:col-span-3">
-              Blocked by:{" "}
-              {(award.unawardedLineIds?.length
-                ? award.unawardedLineIds
-                : [`${award.unawardedLines} lines in this older draft`]
-              ).join(", ")}
-              . Recalculate after clarifications to refresh eligibility.
-            </p>
-          )}
-        </div>
-      )}
-    </section>
   );
 }

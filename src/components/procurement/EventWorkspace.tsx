@@ -6,10 +6,11 @@ import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronDown, Circle, Circl
 import type { SourcingEvent } from '@/lib/procurement/schemas';
 import ComparisonWorkspace from './ComparisonWorkspace';
 import AnalysisWorkspace from './AnalysisWorkspace';
+import AwardWorkspace from './AwardWorkspace';
 import AuditTrail from './AuditTrail';
 import ArtifactViewer, { type ArtifactViewerTarget } from './ArtifactViewer';
 
-type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis';
+type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis' | 'Award';
 type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
 type VendorProgress = { state: VendorState; stage?: string; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string };
 type RunPayload = {
@@ -173,7 +174,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
         <div className="flex min-w-0 items-center gap-2 sm:gap-4"><Link href="/" aria-label="Back to home" className="shrink-0 rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="hidden h-5 w-px bg-[var(--line)] sm:block" /><div className="min-w-0"><p className="truncate text-xs font-semibold tracking-tight sm:text-sm">{event.title}</p><p className="truncate text-[9px] text-[var(--muted)] sm:text-[10px]">{running ? 'Processing responses' : sent ? 'Responses received' : 'Draft'} <span className="hidden sm:inline">· {event.id}</span></p></div></div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3"><span className={`status-pill hidden sm:inline-flex ${aiConfigured ? 'status-ready' : 'status-error'}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span>{sent && !running ? <button onClick={replayShowcase} className="flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold hover:bg-[var(--surface)] sm:px-3.5 sm:text-xs"><RefreshCw size={13} /> Replay <span className="hidden sm:inline">showcase</span></button> : <button disabled={!aiConfigured || sent || running} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55 sm:px-3.5 sm:text-xs">{running ? <LoaderCircle className="animate-spin" size={13} /> : <Send size={13} />}{running ? `${Math.min(completedCount + errorCount + 1, 5)} of 5` : 'Send RFx'}</button>}</div>
       </div>
-      <nav className="flex gap-4 overflow-x-auto px-4 sm:gap-6 sm:px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex shrink-0 items-center gap-2 border-b-2 px-1 py-3 text-[11px] font-semibold sm:text-xs ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
+      <nav className="flex gap-4 overflow-x-auto px-4 sm:gap-6 sm:px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis', 'Award'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex shrink-0 items-center gap-2 border-b-2 px-1 py-3 text-[11px] font-semibold sm:text-xs ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
     </header>
     <main className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-7">
       {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
@@ -181,6 +182,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} replaying={runMode === 'SHOWCASE_REPLAY'} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} startFresh={startFreshRun} />}
       {tab === 'Comparison' && (completedCount ? <ComparisonWorkspace /> : <EmptyTab tab="Comparison" />)}
       {tab === 'Analysis' && (completedCount ? <AnalysisWorkspace /> : <EmptyTab tab="Analysis" />)}
+      {tab === 'Award' && (completedCount ? <AwardWorkspace /> : <EmptyTab tab="Award" />)}
     </main>
   </div>;
 }
@@ -241,4 +243,4 @@ function LineRow({ line, open, onToggle }: { line: SourcingEvent['lineItems'][nu
   return <><tr onClick={onToggle} className="cursor-pointer border-t border-[var(--line)] hover:bg-[#fafbf9]"><td className="px-5 py-4 font-mono text-[11px] text-[var(--muted)]">{line.id}</td><td className="px-3 py-4"><div className="flex items-center gap-2 text-xs font-medium">{line.requestedProduct}<ChevronDown size={13} className={`text-[var(--muted)] transition ${open ? 'rotate-180' : ''}`} /></div></td><td className="px-3 py-4 text-[11px] text-[var(--muted)]">{line.category}</td><td className="px-5 py-4 text-right text-xs font-medium">{line.quantity} {line.unit}</td></tr>{open && <tr className="bg-[var(--surface)]"><td /><td colSpan={3} className="px-3 py-4"><div className="grid gap-5 md:grid-cols-2"><div><p className="eyebrow mb-2">Mandatory</p><ul className="space-y-1.5">{line.mandatorySpecifications.map((spec) => <li key={spec} className="flex gap-2 text-[11px] text-[var(--muted)]"><Check size={12} className="mt-0.5 text-[var(--green)]" />{spec}</li>)}</ul></div><div><p className="eyebrow mb-2">Optional</p><ul className="space-y-1.5">{line.optionalSpecifications.map((spec) => <li key={spec} className="text-[11px] text-[var(--muted)]">{spec}</li>)}</ul></div></div></td></tr>}</>;
 }
 
-function EmptyTab({ tab }: { tab: 'Comparison' | 'Analysis' }) { return <div className="flex min-h-[60vh] items-center justify-center"><div className="max-w-sm text-center"><p className="eyebrow">Available after processing</p><h2 className="mt-3 text-xl font-semibold">{tab} workspace</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Process supplier responses first. This workspace will then use their normalized, validated data.</p></div></div>; }
+function EmptyTab({ tab }: { tab: 'Comparison' | 'Analysis' | 'Award' }) { return <div className="flex min-h-[60vh] items-center justify-center"><div className="max-w-sm text-center"><p className="eyebrow">Available after processing</p><h2 className="mt-3 text-xl font-semibold">{tab} workspace</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Process supplier responses first. This workspace will then use their normalized, validated data.</p></div></div>; }
