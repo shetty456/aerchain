@@ -1,5 +1,8 @@
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
+import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
+import { getDemoRun } from '@/lib/demo/run-manager';
+import { processVendorResponse } from '@/lib/ingestion/pipeline';
 import { getArtifactForVendor, readArtifactBytes } from '@/lib/ingestion/source-artifacts';
 
 export const runtime = 'nodejs';
@@ -22,6 +25,22 @@ function cellText(value: ExcelJS.CellValue) {
   return String(value);
 }
 
+async function getExtractedDetails(vendorId: string) {
+  const run = await getDemoRun();
+  if (!run || run.vendors[vendorId]?.status !== 'READY') return null;
+  const { response } = await processVendorResponse(vendorId, undefined, undefined, { cacheScope: run.cacheScope });
+  const questions = new Map(windowsHardwareEvent.qualificationQuestions.map((question) => [question.id, question.label]));
+  return {
+    qualification: response.qualificationAnswers.map((item) => ({
+      label: questions.get(item.questionId) ?? item.questionId,
+      answer: item.answer,
+      detail: item.detail,
+      evidence: item.evidence,
+    })),
+    commercialTerms: response.commercialTerms,
+  };
+}
+
 export async function GET(request: Request, context: { params: Promise<{ vendorId: string }> }) {
   try {
     const { vendorId } = await context.params;
@@ -36,6 +55,7 @@ export async function GET(request: Request, context: { params: Promise<{ vendorI
         'X-Content-Type-Options': 'nosniff',
       } });
     }
+    const details = await getExtractedDetails(vendorId).catch(() => null);
     if (artifact.kind === 'XLSX') {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(bytes as unknown as ArrayBuffer);
@@ -48,16 +68,16 @@ export async function GET(request: Request, context: { params: Promise<{ vendorI
         });
         sheets.push({ name: sheet.name, rows });
       });
-      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, sheets });
+      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, sheets, details });
     }
     if (artifact.kind === 'DOCX') {
       const document = await mammoth.extractRawText({ buffer: bytes });
-      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: document.value });
+      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: document.value, details });
     }
     if (artifact.kind === 'EMAIL') {
-      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: bytes.toString('utf8') });
+      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: bytes.toString('utf8'), details });
     }
-    return Response.json({ kind: artifact.kind, fileName: artifact.fileName, rawUrl: `/api/demo/artifacts/${vendorId}?mode=raw` });
+    return Response.json({ kind: artifact.kind, fileName: artifact.fileName, rawUrl: `/api/demo/artifacts/${vendorId}?mode=raw`, details });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Supplier attachment is unavailable.' }, { status: 404 });
   }
