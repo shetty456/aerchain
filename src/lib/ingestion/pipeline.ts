@@ -15,6 +15,7 @@ import {
   type RawExtractedResponse,
 } from '@/lib/procurement/schemas';
 import { elapsedSince, procurementLog } from '@/lib/observability/logger';
+import { deriveLineAmbiguities } from '@/lib/procurement/ambiguities';
 import { readPipelineStage, writePipelineStage } from '@/lib/storage/pipeline-cache';
 import { z } from 'zod';
 
@@ -119,7 +120,7 @@ async function mapInBatches(
       schema: rawMetadataBatchSchema,
       system: PROCUREMENT_GUARDRAIL,
       prompt: metadataPrompt(source, fileName, artifactId),
-      maxTokens: 2_500,
+      maxTokens: 3_500,
     });
     await writePipelineStage(vendorId, 'mapping-metadata', metadataHash, generated);
     procurementLog.info('vendor.mapping.metadata.cached', { requestId, vendorId });
@@ -145,7 +146,7 @@ async function mapInBatches(
       schema: rawLineBatchSchema,
       system: PROCUREMENT_GUARDRAIL,
       prompt: lineBatchPrompt(source, fileName, artifactId, offset),
-      maxTokens: 4_000,
+      maxTokens: 4_500,
     });
     await writePipelineStage(vendorId, stage, batchHash, generated);
     procurementLog.info('vendor.mapping.batch.cached', {
@@ -174,8 +175,8 @@ async function mapInBatches(
   const ambiguities: RawExtractedResponse['ambiguities'] = [...metadata.ambiguities];
   for (const batch of batches) {
     lineItems.push(...batch.lineItems);
-    ambiguities.push(...batch.ambiguities);
   }
+  ambiguities.push(...deriveLineAmbiguities(lineItems));
 
   return rawExtractedResponseSchema.parse({
     lineItems,

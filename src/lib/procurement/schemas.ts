@@ -140,7 +140,6 @@ export const rawExtractedResponseSchema = z.object({
 
 export const rawLineBatchSchema = z.object({
   lineItems: z.array(rawExtractedLineSchema),
-  ambiguities: z.array(ambiguitySchema),
 });
 
 export const rawMetadataBatchSchema = z.object({
