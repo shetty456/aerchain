@@ -28,3 +28,16 @@ test('does not change a line when the vendor did not confirm it', () => {
   assert.equal(updated.lineItems[0].status, 'AWAITING_CLARIFICATION');
   assert.deepEqual(updated.lineItems[0].missingInformation, ['Windows edition']);
 });
+
+test('adds an explicitly clarified missing qualification answer', () => {
+  const updated = applyConfirmedClarifications(response, [], [{ questionId: 'authorized-reseller', answer: 'YES', detail: 'OEM authorization confirmed', evidenceExcerpt: 'authorized-reseller: YES.' }]);
+  assert.equal(updated.qualificationAnswers[0].questionId, 'authorized-reseller');
+  assert.equal(updated.qualificationAnswers[0].answer, 'YES');
+  assert.equal(updated.qualificationAnswers[0].evidence[0].location, 'vendor clarification reply');
+});
+
+test('never overwrites an explicit failed qualification answer', () => {
+  const explicitlyFailed = { ...response, qualificationAnswers: [{ questionId: 'authorized-reseller', answer: 'NO' as const, detail: 'Not authorized', evidence: [] }] };
+  const updated = applyConfirmedClarifications(explicitlyFailed, [], [{ questionId: 'authorized-reseller', answer: 'YES', detail: 'Claimed authorization', evidenceExcerpt: 'authorized-reseller: YES.' }]);
+  assert.equal(updated.qualificationAnswers[0].answer, 'NO');
+});

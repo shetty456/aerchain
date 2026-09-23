@@ -17,9 +17,15 @@ const questionSchema = z.object({
 });
 
 const resolutionSchema = z.object({
-  resolutions: z.array(z.object({
+  lineResolutions: z.array(z.object({
     rfxLineId: z.string(),
     confirmed: z.boolean(),
+    detail: z.string(),
+    evidenceExcerpt: z.string(),
+  })),
+  qualificationResolutions: z.array(z.object({
+    questionId: z.string(),
+    answer: z.enum(['YES', 'NO', 'UNKNOWN']),
     detail: z.string(),
     evidenceExcerpt: z.string(),
   })),
@@ -31,7 +37,8 @@ export type ClarificationRecord = {
   subject?: string;
   questions?: string[];
   vendorReply?: string;
-  resolutions?: z.infer<typeof resolutionSchema>['resolutions'];
+  resolutions?: z.infer<typeof resolutionSchema>['lineResolutions'];
+  qualificationResolutions?: z.infer<typeof resolutionSchema>['qualificationResolutions'];
   error?: string;
   history: Array<{ status: string; at: string }>;
   updatedAt: string;
@@ -78,9 +85,13 @@ async function updateRecord(vendorId: string, update: Partial<ClarificationRecor
 
 const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-function simulatedReply(vendorId: string, issues: Array<{ lineId: string; issue: string }>) {
+type ClarificationIssue = { kind: 'LINE' | 'QUALIFICATION'; id: string; issue: string };
+
+function simulatedReply(vendorId: string, issues: ClarificationIssue[]) {
   const vendor = windowsHardwareEvent.invitedVendors.find((item) => item.id === vendorId)!;
-  const confirmations = issues.map((issue) => `${issue.lineId}: Confirmed. Our quoted configuration includes the requested requirement concerning ${issue.issue}`).join('\n');
+  const confirmations = issues.map((issue) => issue.kind === 'LINE'
+    ? `${issue.id}: Confirmed. Our quoted configuration includes the requested requirement concerning ${issue.issue}`
+    : `${issue.id}: YES. We explicitly confirm ${issue.issue}`).join('\n');
   return `Subject: Re: RFx factual clarification\n\nHello Procurement Team,\n\nPlease see our confirmations below:\n${confirmations}\n\nThese confirmations form part of our quotation. Commercial pricing is unchanged.\n\nRegards,\n${vendor.contactName}\n${vendor.name}`;
 }
 
@@ -89,7 +100,8 @@ async function executeClarification(vendorId: string) {
     const result = await processVendorResponse(vendorId);
     const records = await readRecords();
     const previousResolutions = records[vendorId]?.resolutions ?? [];
-    const response = applyConfirmedClarifications(result.response, previousResolutions);
+    const previousQualificationResolutions = records[vendorId]?.qualificationResolutions ?? [];
+    const response = applyConfirmedClarifications(result.response, previousResolutions, previousQualificationResolutions);
     const validLineIds = new Set(windowsHardwareEvent.lineItems.map((line) => line.id));
     const alreadyConfirmed = new Set(previousResolutions.filter((item) => item.confirmed).map((item) => item.rfxLineId));
     const uniqueIssues = new Map<string, string>();
@@ -98,14 +110,21 @@ async function executeClarification(vendorId: string) {
       if (!validLineIds.has(ambiguity.lineId) || alreadyConfirmed.has(ambiguity.lineId) || uniqueIssues.has(ambiguity.lineId)) continue;
       uniqueIssues.set(ambiguity.lineId, ambiguity.issue);
     }
-    const issues = [...uniqueIssues].slice(0, 3).map(([lineId, issue]) => ({ lineId, issue }));
-    if (!issues.length) throw new Error('This vendor has no factual line-item gaps available for autonomous clarification.');
+    const validQuestionIds = new Set(windowsHardwareEvent.qualificationQuestions.map((question) => question.id));
+    const alreadyAnswered = new Set(previousQualificationResolutions.filter((item) => item.answer !== 'UNKNOWN').map((item) => item.questionId));
+    const answerByQuestion = new Map(response.qualificationAnswers.map((answer) => [answer.questionId, answer.answer]));
+    const qualificationIssues: ClarificationIssue[] = windowsHardwareEvent.qualificationQuestions
+      .filter((question) => !alreadyAnswered.has(question.id) && (!answerByQuestion.has(question.id) || answerByQuestion.get(question.id) === 'UNKNOWN'))
+      .map((question) => ({ kind: 'QUALIFICATION' as const, id: question.id, issue: question.description }));
+    const lineIssues: ClarificationIssue[] = [...uniqueIssues].map(([lineId, issue]) => ({ kind: 'LINE' as const, id: lineId, issue }));
+    const issues = [...qualificationIssues, ...lineIssues].slice(0, 3);
+    if (!issues.length) throw new Error('This vendor has no factual gaps available for autonomous clarification.');
 
     const question = await procurementAiProvider.generateStructured({
       schemaName: 'vendor_clarification_questions',
       schema: questionSchema,
       system: CLARIFICATION_GUARDRAIL,
-      prompt: `Vendor: ${windowsHardwareEvent.invitedVendors.find((vendor) => vendor.id === vendorId)?.name}\nCreate one concise email covering these factual gaps. Keep the RFx line IDs in each question.\n\n${JSON.stringify(issues)}`,
+      prompt: `Vendor: ${windowsHardwareEvent.invitedVendors.find((vendor) => vendor.id === vendorId)?.name}\nCreate one concise email covering these factual gaps. Keep every supplied identifier in its question.\n\n${JSON.stringify(issues)}`,
       maxTokens: 1_200,
     });
     await updateRecord(vendorId, { status: 'SENT', subject: question.subject, questions: question.questions });
@@ -124,11 +143,15 @@ async function executeClarification(vendorId: string) {
       maxTokens: 1_500,
     });
     const merged = new Map(previousResolutions.map((item) => [item.rfxLineId, item]));
-    for (const resolution of interpreted.resolutions) {
+    for (const resolution of interpreted.lineResolutions) {
       if (validLineIds.has(resolution.rfxLineId)) merged.set(resolution.rfxLineId, resolution);
     }
-    await updateRecord(vendorId, { status: 'COMPLETED', resolutions: [...merged.values()] });
-    procurementLog.info('clarification.completed', { vendorId, resolutionCount: interpreted.resolutions.length });
+    const mergedQualification = new Map(previousQualificationResolutions.map((item) => [item.questionId, item]));
+    for (const resolution of interpreted.qualificationResolutions) {
+      if (validQuestionIds.has(resolution.questionId)) mergedQualification.set(resolution.questionId, resolution);
+    }
+    await updateRecord(vendorId, { status: 'COMPLETED', resolutions: [...merged.values()], qualificationResolutions: [...mergedQualification.values()] });
+    procurementLog.info('clarification.completed', { vendorId, lineResolutionCount: interpreted.lineResolutions.length, qualificationResolutionCount: interpreted.qualificationResolutions.length });
   } catch (error) {
     await updateRecord(vendorId, { status: 'FAILED', error: error instanceof Error ? error.message : 'Clarification failed.' });
     procurementLog.error('clarification.failed', { vendorId, error: error instanceof Error ? error.message : 'Unknown error' });
@@ -163,6 +186,6 @@ export async function getClarifications() {
 }
 
 export function applyClarification(response: VendorResponse, record?: ClarificationRecord): VendorResponse {
-  if (record?.status !== 'COMPLETED' || !record.resolutions?.length) return response;
-  return applyConfirmedClarifications(response, record.resolutions);
+  if (!record) return response;
+  return applyConfirmedClarifications(response, record.resolutions ?? [], record.qualificationResolutions ?? []);
 }

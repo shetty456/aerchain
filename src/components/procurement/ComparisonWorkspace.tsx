@@ -15,7 +15,7 @@ type ComparisonPayload = {
     vendor: { id: string; name: string; responseFormat: string };
     qualification: { status: 'QUALIFIED' | 'DISQUALIFIED' | 'INCOMPLETE'; failed: string[]; unknown: string[] };
     response: VendorResponse;
-    clarification: { status: 'GENERATING' | 'SENT' | 'RESPONSE_RECEIVED' | 'REPROCESSING' | 'COMPLETED' | 'FAILED'; questions?: string[]; resolutions?: Array<{ rfxLineId: string; confirmed: boolean }>; error?: string } | null;
+    clarification: { status: 'GENERATING' | 'SENT' | 'RESPONSE_RECEIVED' | 'REPROCESSING' | 'COMPLETED' | 'FAILED'; questions?: string[]; resolutions?: Array<{ rfxLineId: string; confirmed: boolean }>; qualificationResolutions?: Array<{ questionId: string; answer: 'YES' | 'NO' | 'UNKNOWN' }>; error?: string } | null;
   }>;
 };
 
@@ -91,13 +91,17 @@ export default function ComparisonWorkspace() {
 
     <section className="mb-5 overflow-hidden rounded-xl border border-[var(--line)] bg-white">
       <div className="flex items-center gap-2 border-b border-[var(--line)] px-5 py-3"><MailQuestion size={14} /><div><h2 className="text-xs font-semibold">Factual clarifications</h2><p className="mt-1 text-[10px] text-[var(--muted)]">AI may confirm missing facts. Substitutions and commercial decisions remain with the buyer.</p></div></div>
-      <div className="divide-y divide-[var(--line)]">{data.vendors.map(({ vendor, response, clarification }) => {
+      <div className="divide-y divide-[var(--line)]">{data.vendors.map(({ vendor, response, qualification, clarification }) => {
         const factualCount = response.lineItems.filter((line) => line.status === 'AWAITING_CLARIFICATION').length;
+        const qualificationGapCount = qualification.unknown.length;
+        const totalGapCount = factualCount + qualificationGapCount;
         const validLineIds = new Set(response.lineItems.map((line) => line.rfxLineId));
         const clarifiedCount = clarification?.resolutions?.filter((item) => item.confirmed && validLineIds.has(item.rfxLineId)).length ?? 0;
+        const clarifiedQualificationCount = clarification?.qualificationResolutions?.filter((item) => item.answer !== 'UNKNOWN').length ?? 0;
+        const totalClarified = clarifiedCount + clarifiedQualificationCount;
         const active = clarification && !['COMPLETED', 'FAILED'].includes(clarification.status);
-        const label = clarification?.status === 'GENERATING' ? 'Drafting questions' : clarification?.status === 'SENT' ? 'Sent to vendor' : clarification?.status === 'RESPONSE_RECEIVED' ? 'Reply received' : clarification?.status === 'REPROCESSING' ? 'Reprocessing reply' : clarification?.status === 'COMPLETED' ? `${clarifiedCount} clarified · ${factualCount} still awaiting` : clarification?.status === 'FAILED' ? 'Clarification failed' : `${factualCount} factual gaps`;
-        return <div key={vendor.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-xs font-semibold">{vendor.name}</p><p className={`mt-1 text-[10px] ${clarification?.status === 'FAILED' ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>{label}</p></div>{factualCount > 0 && <button disabled={clarificationActive} onClick={() => clarify(vendor.id)} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-wait disabled:opacity-55">{active ? <LoaderCircle className="animate-spin" size={12} /> : <Send size={12} />}{active ? 'Working…' : clarification?.status === 'FAILED' ? 'Retry clarification' : clarifiedCount ? 'Clarify next 3' : 'Send clarification'}</button>}</div>;
+        const label = clarification?.status === 'GENERATING' ? 'Drafting questions' : clarification?.status === 'SENT' ? 'Sent to vendor' : clarification?.status === 'RESPONSE_RECEIVED' ? 'Reply received' : clarification?.status === 'REPROCESSING' ? 'Reprocessing reply' : clarification?.status === 'COMPLETED' ? `${totalClarified} clarified · ${totalGapCount} still awaiting` : clarification?.status === 'FAILED' ? 'Clarification failed' : `${factualCount} line gaps · ${qualificationGapCount} qualification gaps`;
+        return <div key={vendor.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-xs font-semibold">{vendor.name}</p><p className={`mt-1 text-[10px] ${clarification?.status === 'FAILED' ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>{label}</p></div>{totalGapCount > 0 && <button disabled={clarificationActive} onClick={() => clarify(vendor.id)} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-wait disabled:opacity-55">{active ? <LoaderCircle className="animate-spin" size={12} /> : <Send size={12} />}{active ? 'Working…' : clarification?.status === 'FAILED' ? 'Retry clarification' : totalClarified ? 'Clarify next 3' : 'Send clarification'}</button>}</div>;
       })}</div>
     </section>
 
