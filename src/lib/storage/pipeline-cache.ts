@@ -2,7 +2,12 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 
-type PipelineStage = 'extraction' | 'mapping' | 'normalization';
+type PipelineStage =
+  | 'extraction'
+  | 'mapping'
+  | 'mapping-metadata'
+  | `mapping-lines-${number}`
+  | 'normalization';
 
 interface CacheEnvelope<T> {
   version: 1;
@@ -13,6 +18,7 @@ interface CacheEnvelope<T> {
 
 function stagePath(vendorId: string, stage: PipelineStage) {
   if (!/^[a-z0-9-]+$/.test(vendorId)) throw new Error(`Invalid vendor cache key: ${vendorId}`);
+  if (!/^[a-z0-9-]+$/.test(stage)) throw new Error(`Invalid pipeline stage: ${stage}`);
   const runtimeDirectory = process.env.PIPELINE_CACHE_DIR || path.join(process.cwd(), '.demo-runtime', 'vendors');
   return path.join(runtimeDirectory, vendorId, `${stage}.json`);
 }

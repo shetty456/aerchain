@@ -11,6 +11,19 @@ test('repairs GPT-OSS stray quotes between generated array objects', () => {
   });
 });
 
+test('removes empty placeholders introduced between objects during JSON repair', () => {
+  const schema = z.object({
+    items: z.array(z.object({ id: z.string(), notes: z.array(z.string()) })),
+  });
+  const generated = '{"items":[{"id":"HW-001","notes":[""]},"",{"id":"HW-002","notes":[]}]}';
+  assert.deepEqual(recoverFailedGeneration(generated, schema), {
+    items: [
+      { id: 'HW-001', notes: [''] },
+      { id: 'HW-002', notes: [] },
+    ],
+  });
+});
+
 test('rejects a repaired generation that still violates the domain schema', () => {
   const schema = z.object({ items: z.array(z.object({ id: z.string() })) });
   assert.throws(() => recoverFailedGeneration('{"items":[{"id":42}]}', schema), z.ZodError);

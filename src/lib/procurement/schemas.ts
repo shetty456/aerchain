@@ -138,6 +138,17 @@ export const rawExtractedResponseSchema = z.object({
   clarificationRequired: z.boolean(),
 });
 
+export const rawLineBatchSchema = z.object({
+  lineItems: z.array(rawExtractedLineSchema),
+  ambiguities: z.array(ambiguitySchema),
+});
+
+export const rawMetadataBatchSchema = z.object({
+  qualificationAnswers: z.array(qualificationAnswerSchema),
+  commercialTerms: rawCommercialTermsSchema,
+  ambiguities: z.array(ambiguitySchema),
+});
+
 export const sourcingEventSchema = z.object({
   id: z.string(),
   title: z.string(),

@@ -7,12 +7,19 @@ import { procurementAiProvider } from '@/lib/ai/procurement-provider';
 import { extractSource, getArtifactForVendor } from './source-artifacts';
 import { getArtifactFingerprint } from './source-artifacts';
 import { normalizeResponse } from './canonicalize';
-import { rawExtractedResponseSchema, vendorResponseSchema } from '@/lib/procurement/schemas';
+import {
+  rawExtractedResponseSchema,
+  rawLineBatchSchema,
+  rawMetadataBatchSchema,
+  vendorResponseSchema,
+  type RawExtractedResponse,
+} from '@/lib/procurement/schemas';
 import { elapsedSince, procurementLog } from '@/lib/observability/logger';
 import { readPipelineStage, writePipelineStage } from '@/lib/storage/pipeline-cache';
 import { z } from 'zod';
 
-const PIPELINE_SCHEMA_VERSION = 'vendor-response-v3';
+const PIPELINE_SCHEMA_VERSION = 'vendor-response-batched-v1';
+const LINE_BATCH_SIZE = 10;
 const extractedSourceCacheSchema = z.object({
   artifact: z.object({ id: z.string(), vendorId: z.string(), kind: z.enum(['XLSX', 'PDF', 'DOCX', 'IMAGE', 'EMAIL']), fileName: z.string() }),
   content: z.string(),
@@ -20,15 +27,15 @@ const extractedSourceCacheSchema = z.object({
   extractionMethod: z.enum(['LOCAL_STRUCTURAL', 'SARVAM_VISION']),
 });
 
-function mapPrompt(source: string, fileName: string, artifactId: string) {
-  const rfx = windowsHardwareEvent.lineItems.map((line) => ({
+function lineBatchPrompt(source: string, fileName: string, artifactId: string, lineOffset: number) {
+  const rfx = windowsHardwareEvent.lineItems.slice(lineOffset, lineOffset + LINE_BATCH_SIZE).map((line) => ({
     id: line.id,
     requestedProduct: line.requestedProduct,
     quantity: line.quantity,
     unit: line.unit,
     mandatorySpecifications: line.mandatorySpecifications,
   }));
-  return `Map the vendor response below to the RFx lines.
+  return `Extract only quotations that map to the following RFx subset.
 
 Rules:
 - Map by meaning, model and specification, not row position alone.
@@ -36,16 +43,98 @@ Rules:
 - A missing specification is AMBIGUOUS or UNKNOWN, never silently MEETS.
 - A different make/model may be a buyer judgment issue even when superficially equivalent.
 - Evidence must use artifactId "${artifactId}", fileName "${fileName}", and only locations/excerpts supported by the source.
-- Return only actually quoted lines. Missing RFx lines are added deterministically later.
+- Return only actually quoted lines from this RFx subset. Do not return lines outside the subset.
+- Return no more than ${LINE_BATCH_SIZE} line items. Missing RFx lines are added deterministically later.
 
 RFx lines:
 ${JSON.stringify(rfx)}
 
+Vendor source:
+${source}`;
+}
+
+function metadataPrompt(source: string, fileName: string, artifactId: string) {
+  return `Extract only supplier qualification answers and commercial terms from this vendor response.
+
+Rules:
+- Never infer a missing answer or term.
+- Evidence must use artifactId "${artifactId}", fileName "${fileName}", and only locations/excerpts supported by the source.
+- Unknown mandatory answers remain UNKNOWN; they are not failures.
+- Capture factual ambiguities about qualification or commercial terms.
+
 Qualification questions:
 ${JSON.stringify(windowsHardwareEvent.qualificationQuestions)}
 
+Requested commercial terms:
+${JSON.stringify(windowsHardwareEvent.requestedCommercialTerms)}
+
 Vendor source:
 ${source}`;
+}
+
+async function mapInBatches(
+  vendorId: string,
+  source: string,
+  fileName: string,
+  artifactId: string,
+  mappingHash: string,
+  provider: AiProvider,
+  requestId: string,
+): Promise<RawExtractedResponse> {
+  const metadataHash = `${mappingHash}:metadata`;
+  let metadata = await readPipelineStage(vendorId, 'mapping-metadata', metadataHash, rawMetadataBatchSchema);
+  if (metadata) {
+    procurementLog.info('vendor.mapping.metadata.cache_hit', { requestId, vendorId });
+  } else {
+    procurementLog.info('vendor.mapping.metadata.started', { requestId, vendorId });
+    metadata = await provider.generateStructured({
+      schemaName: 'vendor_response_metadata',
+      schema: rawMetadataBatchSchema,
+      system: PROCUREMENT_GUARDRAIL,
+      prompt: metadataPrompt(source, fileName, artifactId),
+      maxTokens: 4_000,
+    });
+    await writePipelineStage(vendorId, 'mapping-metadata', metadataHash, metadata);
+    procurementLog.info('vendor.mapping.metadata.cached', { requestId, vendorId });
+  }
+
+  const lineItems: RawExtractedResponse['lineItems'] = [];
+  const ambiguities: RawExtractedResponse['ambiguities'] = [...metadata.ambiguities];
+  for (let offset = 0; offset < windowsHardwareEvent.lineItems.length; offset += LINE_BATCH_SIZE) {
+    const batchNumber = offset / LINE_BATCH_SIZE + 1;
+    const stage = `mapping-lines-${batchNumber}` as const;
+    const batchHash = `${mappingHash}:lines:${offset}:${LINE_BATCH_SIZE}`;
+    let batch = await readPipelineStage(vendorId, stage, batchHash, rawLineBatchSchema);
+    if (batch) {
+      procurementLog.info('vendor.mapping.batch.cache_hit', { requestId, vendorId, batchNumber });
+    } else {
+      procurementLog.info('vendor.mapping.batch.started', { requestId, vendorId, batchNumber });
+      batch = await provider.generateStructured({
+        schemaName: `vendor_response_lines_${batchNumber}`,
+        schema: rawLineBatchSchema,
+        system: PROCUREMENT_GUARDRAIL,
+        prompt: lineBatchPrompt(source, fileName, artifactId, offset),
+        maxTokens: 6_000,
+      });
+      await writePipelineStage(vendorId, stage, batchHash, batch);
+      procurementLog.info('vendor.mapping.batch.cached', {
+        requestId,
+        vendorId,
+        batchNumber,
+        extractedLines: batch.lineItems.length,
+      });
+    }
+    lineItems.push(...batch.lineItems);
+    ambiguities.push(...batch.ambiguities);
+  }
+
+  return rawExtractedResponseSchema.parse({
+    lineItems,
+    qualificationAnswers: metadata.qualificationAnswers,
+    commercialTerms: metadata.commercialTerms,
+    ambiguities,
+    clarificationRequired: ambiguities.some((ambiguity) => ambiguity.resolution === 'CLARIFY_VENDOR'),
+  });
 }
 
 export async function processVendorResponse(vendorId: string, provider: AiProvider = procurementAiProvider, requestId = crypto.randomUUID()) {
@@ -74,13 +163,7 @@ export async function processVendorResponse(vendorId: string, provider: AiProvid
     procurementLog.info('vendor.mapping.cache_hit', { requestId, vendorId, schemaVersion: PIPELINE_SCHEMA_VERSION });
   } else {
     procurementLog.info('vendor.mapping.cache_miss', { requestId, vendorId, schemaVersion: PIPELINE_SCHEMA_VERSION });
-    raw = await provider.generateStructured({
-      schemaName: 'vendor_response_extraction',
-      schema: rawExtractedResponseSchema,
-      system: PROCUREMENT_GUARDRAIL,
-      prompt: mapPrompt(source.content, artifact.fileName, artifact.id),
-      maxTokens: 16_000,
-    });
+    raw = await mapInBatches(vendorId, source.content, artifact.fileName, artifact.id, mappingHash, provider, requestId);
     await writePipelineStage(vendorId, 'mapping', mappingHash, raw);
     procurementLog.info('vendor.mapping.cached', { requestId, vendorId, extractedLines: raw.lineItems.length });
   }

@@ -14,6 +14,14 @@ function getClient() {
   return new Groq({ apiKey, timeout, maxRetries: 2 });
 }
 
+function safeErrorMessage(error: unknown) {
+  if (error instanceof APIError) {
+    const body = error.error as { message?: string; error?: { message?: string } } | undefined;
+    return `Groq HTTP ${error.status ?? 'error'}: ${body?.message ?? body?.error?.message ?? 'request failed'}`;
+  }
+  return error instanceof Error ? error.message : 'Unknown error';
+}
+
 export class GroqReasoningProvider {
   async generateStructured<TSchema extends z.ZodType>(
     request: StructuredGenerationRequest<TSchema>,
@@ -86,7 +94,7 @@ export class GroqReasoningProvider {
         schema: request.schemaName,
         model,
         elapsedMs: elapsedSince(startedAt),
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: safeErrorMessage(error),
       });
       throw new AiProviderError(
         isTimeout ? 'Groq timed out while mapping the vendor response.' : 'Groq structured generation failed.',
