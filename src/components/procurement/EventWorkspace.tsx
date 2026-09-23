@@ -30,10 +30,17 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
   const [progress, setProgress] = useState<Record<string, VendorProgress>>(() => initialProgress(event));
   const [actionError, setActionError] = useState<string | null>(null);
   const [runMode, setRunMode] = useState<RunPayload['mode']>();
+  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const stepInFlight = useRef(false);
 
   function applyRun(run: RunPayload | null) {
     if (!run) return;
+    if (Object.values(run.vendors).some((vendor) => vendor.error?.toLowerCase().includes('usage limit reached'))) {
+      const until = Date.now() + 60_000;
+      sessionStorage.setItem('aerchain-ai-rate-limit-until', String(until));
+      setRateLimitUntil(until); setNow(Date.now());
+    }
     setRunStatus(run.status);
     setRunMode(run.mode);
     setProgress(Object.fromEntries(event.invitedVendors.map((vendor) => {
@@ -59,6 +66,28 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
   // The event dataset is static for this workspace.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const saved = Number(sessionStorage.getItem('aerchain-ai-rate-limit-until')) || null;
+    queueMicrotask(() => setRateLimitUntil(saved && saved > Date.now() ? saved : null));
+    const handleRateLimit = (event: Event) => {
+      const seconds = Math.max(1, Number((event as CustomEvent<{ retryAfterSeconds?: number }>).detail?.retryAfterSeconds) || 60);
+      const until = Date.now() + seconds * 1_000;
+      sessionStorage.setItem('aerchain-ai-rate-limit-until', String(until));
+      setRateLimitUntil(until); setNow(Date.now());
+    };
+    window.addEventListener('aerchain:ai-rate-limit', handleRateLimit);
+    return () => window.removeEventListener('aerchain:ai-rate-limit', handleRateLimit);
+  }, []);
+
+  useEffect(() => {
+    if (!rateLimitUntil) return;
+    const timer = setInterval(() => {
+      const current = Date.now(); setNow(current);
+      if (current >= rateLimitUntil) { setRateLimitUntil(null); sessionStorage.removeItem('aerchain-ai-rate-limit-until'); }
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [rateLimitUntil]);
 
   useEffect(() => {
     if (runStatus !== 'RUNNING') return;
@@ -177,6 +206,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       <nav className="flex gap-4 overflow-x-auto px-4 sm:gap-6 sm:px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis', 'Award'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex shrink-0 items-center gap-2 border-b-2 px-1 py-3 text-[11px] font-semibold sm:text-xs ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
     </header>
     <main className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-7">
+      {rateLimitUntil && rateLimitUntil > now && <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"><AlertCircle className="mt-0.5 shrink-0" size={14} /><div><p className="font-semibold">AI usage limit reached</p><p className="mt-1 leading-5">New AI requests are temporarily unavailable. Saved comparisons, attachments, recommendations, and cached analysis remain usable. Try again in about {Math.max(1, Math.ceil((rateLimitUntil - now) / 1000))} seconds.</p></div></div>}
       {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
       {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
       {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} replaying={runMode === 'SHOWCASE_REPLAY'} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} startFresh={startFreshRun} />}

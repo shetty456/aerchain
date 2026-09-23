@@ -45,6 +45,9 @@ export default function AnalysisWorkspace() {
         body: JSON.stringify({ question: asked }),
       });
       const payload = await response.json();
+      if (payload.code === "AI_RATE_LIMIT" || payload.rateLimit) {
+        window.dispatchEvent(new CustomEvent("aerchain:ai-rate-limit", { detail: { retryAfterSeconds: payload.retryAfterSeconds ?? payload.rateLimit?.retryAfterSeconds ?? 60 } }));
+      }
       if (!response.ok) throw new Error(payload.error || "Analysis failed.");
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", answer: payload }]);
     } catch (reason) {

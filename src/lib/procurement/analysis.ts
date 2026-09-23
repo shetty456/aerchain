@@ -13,6 +13,7 @@ const eligibleStatuses = new Set(['VERIFIED', 'NORMALIZED']);
 export function analyzeProcurement(operationOrPlan: string | AnalysisPlan, allLines: RfxLine[], allVendors: AnalysisVendor[]) {
   const plan = typeof operationOrPlan === 'string' ? { operation: operationOrPlan } : operationOrPlan;
   const operation = plan.operation;
+  if (operation === 'OUT_OF_SCOPE' || operation === 'BUYER_DECISION_REQUIRED') return { operation, allowed: false };
   const requestedVendors = new Set(plan.vendorNames?.map((name) => name.toLowerCase()));
   const requestedCategories = new Set(plan.categories?.map((category) => category.toLowerCase()));
   const requestedLines = new Set(plan.lineIds?.map((id) => id.toUpperCase()));

@@ -81,3 +81,15 @@ test('analysis filters lines before performing deterministic calculations', () =
   assert.equal(result.scope.lineCount, 1);
   assert.equal(result.lines[0].lineId, selectedLines[1].id);
 });
+
+test('out-of-scope analysis never returns procurement data', () => {
+  assert.deepEqual(analyzeProcurement('OUT_OF_SCOPE', windowsHardwareEvent.lineItems, []), {
+    operation: 'OUT_OF_SCOPE', allowed: false,
+  });
+});
+
+test('commercial commitments are routed back to buyer judgment', () => {
+  assert.deepEqual(analyzeProcurement('BUYER_DECISION_REQUIRED', windowsHardwareEvent.lineItems, []), {
+    operation: 'BUYER_DECISION_REQUIRED', allowed: false,
+  });
+});

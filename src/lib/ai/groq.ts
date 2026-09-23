@@ -22,6 +22,15 @@ function safeErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error';
 }
 
+function retryAfterSeconds(error: APIError) {
+  const header = error.headers?.get('retry-after');
+  const headerSeconds = Number(header);
+  if (Number.isFinite(headerSeconds) && headerSeconds > 0) return Math.ceil(headerSeconds);
+  const message = safeErrorMessage(error);
+  const seconds = message.match(/try again in ([\d.]+)s/i)?.[1];
+  return seconds ? Math.ceil(Number(seconds)) : 60;
+}
+
 export class GroqReasoningProvider {
   async generateStructured<TSchema extends z.ZodType>(
     request: StructuredGenerationRequest<TSchema>,
@@ -63,6 +72,11 @@ export class GroqReasoningProvider {
       return parsed;
     } catch (error) {
       if (error instanceof AiConfigurationError) throw error;
+      if (error instanceof APIError && error.status === 429) {
+        const retryAfter = retryAfterSeconds(error);
+        procurementLog.warn('groq.rate_limit.reached', { schema: request.schemaName, model, retryAfterSeconds: retryAfter, elapsedMs: elapsedSince(startedAt) });
+        throw new AiProviderError('AI usage limit reached. Please try again shortly.', error, 'RATE_LIMIT', retryAfter);
+      }
       if (error instanceof APIError) {
         const body = error.error as { failed_generation?: string | null; error?: { failed_generation?: string | null } } | undefined;
         const failedGeneration = body?.failed_generation ?? body?.error?.failed_generation;

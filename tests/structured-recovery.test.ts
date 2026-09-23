@@ -28,3 +28,8 @@ test('rejects a repaired generation that still violates the domain schema', () =
   const schema = z.object({ items: z.array(z.object({ id: z.string() })) });
   assert.throws(() => recoverFailedGeneration('{"items":[{"id":42}]}', schema), z.ZodError);
 });
+
+test('unwraps a JSON document returned as a JSON string', () => {
+  const schema = z.object({ operation: z.literal('SUMMARY') });
+  assert.deepEqual(recoverFailedGeneration('"{\\"operation\\":\\"SUMMARY\\"}"', schema), { operation: 'SUMMARY' });
+});

@@ -18,6 +18,11 @@ export function recoverFailedGeneration<TSchema extends z.ZodType>(failedGenerat
   // [{...},"{"field":...}] → [{...},{"field":...}]. Repair only this
   // structural position, then require full schema validation.
   const withoutQuotedObjects = failedGeneration.replace(/([,[])\s*"\{/g, '$1{');
-  const repaired = JSON.parse(jsonrepair(withoutQuotedObjects));
+  let repaired = JSON.parse(jsonrepair(withoutQuotedObjects));
+  // Some compatible providers wrap the entire JSON document in a JSON string.
+  // Unwrap only valid JSON strings, then still require full domain validation.
+  if (typeof repaired === 'string') {
+    try { repaired = JSON.parse(jsonrepair(repaired)); } catch { /* Schema validation below reports the original malformed shape. */ }
+  }
   return schema.parse(removeObjectArrayPlaceholders(repaired));
 }
