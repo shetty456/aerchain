@@ -17,7 +17,7 @@ export const sourceEvidenceSchema = z.object({
   fileName: z.string(),
   location: z.string().describe('Human-readable page, sheet, paragraph, or line reference.'),
   excerpt: z.string(),
-  providerSource: z.string().optional(),
+  providerSource: z.string().nullable(),
 });
 
 export const rfxLineSchema = z.object({
@@ -48,8 +48,8 @@ export const vendorSchema = z.object({
 export const qualificationAnswerSchema = z.object({
   questionId: z.string(),
   answer: z.enum(['YES', 'NO', 'UNKNOWN']),
-  detail: z.string().optional(),
-  evidence: sourceEvidenceSchema.optional(),
+  detail: z.string().nullable(),
+  evidence: sourceEvidenceSchema.nullable(),
 });
 
 export const commercialTermsSchema = z.object({
