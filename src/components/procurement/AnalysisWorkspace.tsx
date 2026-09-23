@@ -48,7 +48,7 @@ export default function AnalysisWorkspace() {
     <div className="mx-auto max-w-5xl">
       <div>
         <p className="eyebrow">Procurement analyst</p>
-        <h1 className="mt-2 text-2xl font-semibold">
+        <h1 className="mt-2 text-xl font-semibold sm:text-2xl">
           Ask about this sourcing event
         </h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
@@ -56,12 +56,13 @@ export default function AnalysisWorkspace() {
           deterministically over normalized data.
         </p>
       </div>
-      <div className="mt-6 flex flex-wrap gap-2">
+      <p className="eyebrow mt-6">Try a common question</p>
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap">
         {suggestions.map((item) => (
           <button
             key={item}
             onClick={() => void ask(item)}
-            className="rounded-full border border-[var(--line)] bg-white px-3 py-2 text-[11px] hover:border-[var(--line-strong)]"
+            className="shrink-0 rounded-full border border-[var(--line)] bg-white px-3 py-2 text-[11px] hover:border-[var(--line-strong)]"
           >
             {item}
           </button>
@@ -199,8 +200,8 @@ function ResultTable({
 }) {
   const rows = selections.filter(Boolean).slice(0, 5);
   return (
-    <div className="mt-4 rounded-lg border border-[var(--line)]">
-      <table className="w-full text-left text-[11px]">
+    <div className="mt-4 overflow-x-auto rounded-lg border border-[var(--line)]">
+      <table className="w-full min-w-[520px] text-left text-[11px]">
         <thead className="bg-[var(--surface)]">
           <tr>
             <th className="px-3 py-2">Line</th>
@@ -292,7 +293,7 @@ function AwardPanel() {
             explicitly accept it before export.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           {award?.status === "DRAFT" && (
             <button
               disabled={busy}
