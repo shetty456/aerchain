@@ -6,9 +6,28 @@ html {
 }
 
 body {
-  background: #ffffff;
-  color: #1a1a1a;
+  background: var(--surface);
+  color: var(--ink);
 }
+
+:root {
+  --ink: #18211d;
+  --muted: #69716c;
+  --muted-light: #929994;
+  --surface: #f7f8f6;
+  --line: #e5e8e4;
+  --line-strong: #d6dad5;
+  --green: #176b51;
+  --green-soft: #e9f4ef;
+  --red: #a3413b;
+  --red-soft: #faecea;
+}
+
+button, a { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-light); }
+.status-pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--surface); }
+.status-ready { border-color: #cae4d8; color: var(--green); background: var(--green-soft); }
 
 /* Subtle scrollbar — Notion style */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

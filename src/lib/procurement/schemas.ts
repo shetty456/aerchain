@@ -102,6 +102,42 @@ export const vendorResponseSchema = z.object({
   clarificationRequired: z.boolean(),
 });
 
+export const rawExtractedLineSchema = z.object({
+  candidateRfxLineId: z.string().nullable(),
+  matchStatus: z.enum(['MATCHED', 'AMBIGUOUS', 'UNMATCHED']),
+  quotedDescription: z.string(),
+  quotedQuantity: z.number().positive().nullable(),
+  rawPrice: z.number().nonnegative().nullable(),
+  rawCurrency: currencySchema.nullable(),
+  priceBasis: z.number().int().positive().nullable().describe('Number of units covered by rawPrice, for example 100 for per-100 pricing.'),
+  rawUnit: z.string().nullable(),
+  specificationMatch: z.enum(['MEETS', 'DEVIATES', 'AMBIGUOUS', 'UNKNOWN']),
+  specificationDeviations: z.array(z.string()),
+  missingInformation: z.array(z.string()),
+  evidence: z.array(sourceEvidenceSchema),
+});
+
+export const rawCommercialTermsSchema = z.object({
+  currency: currencySchema.nullable(),
+  freight: z.enum(['INCLUDED', 'EXCLUDED', 'UNKNOWN']),
+  tax: z.enum(['INCLUDED', 'EXCLUDED', 'UNKNOWN']),
+  paymentTerms: z.string().nullable(),
+  deliveryLeadTimeDays: z.number().int().positive().nullable(),
+  warrantyMonths: z.number().int().positive().nullable(),
+  quoteValidityDays: z.number().int().positive().nullable(),
+  discountPercent: z.number().min(0).max(100).nullable(),
+  minimumOrderCondition: z.string().nullable(),
+  evidence: z.array(sourceEvidenceSchema),
+});
+
+export const rawExtractedResponseSchema = z.object({
+  lineItems: z.array(rawExtractedLineSchema),
+  qualificationAnswers: z.array(qualificationAnswerSchema),
+  commercialTerms: rawCommercialTermsSchema,
+  ambiguities: z.array(ambiguitySchema),
+  clarificationRequired: z.boolean(),
+});
+
 export const sourcingEventSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -120,3 +156,4 @@ export type SourcingEvent = z.infer<typeof sourcingEventSchema>;
 export type RfxLine = z.infer<typeof rfxLineSchema>;
 export type VendorResponse = z.infer<typeof vendorResponseSchema>;
 export type SourceEvidence = z.infer<typeof sourceEvidenceSchema>;
+export type RawExtractedResponse = z.infer<typeof rawExtractedResponseSchema>;

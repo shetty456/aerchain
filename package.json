@@ -8,20 +8,17 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
     "demo:artifacts": "tsx scripts/generate-demo-artifacts.ts"
   },
   "dependencies": {
-    "clsx": "^2.1.1",
-    "framer-motion": "^12.40.0",
-    "konva": "^10.3.0",
     "lucide-react": "^1.21.0",
+    "mammoth": "^1.12.3",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-konva": "^19.2.5",
     "sarvamai": "^1.1.10",
-    "tailwind-merge": "^3.6.0",
-    "tesseract.js": "^7.0.0",
+    "server-only": "^0.0.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
