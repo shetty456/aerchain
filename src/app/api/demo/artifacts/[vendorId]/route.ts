@@ -68,16 +68,16 @@ export async function GET(request: Request, context: { params: Promise<{ vendorI
         });
         sheets.push({ name: sheet.name, rows });
       });
-      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, sheets, details });
+      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, sheets, details }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (artifact.kind === 'DOCX') {
       const document = await mammoth.extractRawText({ buffer: bytes });
-      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: document.value, details });
+      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: document.value, details }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (artifact.kind === 'EMAIL') {
-      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: bytes.toString('utf8'), details });
+      return Response.json({ kind: artifact.kind, fileName: artifact.fileName, text: bytes.toString('utf8'), details }, { headers: { 'Cache-Control': 'no-store' } });
     }
-    return Response.json({ kind: artifact.kind, fileName: artifact.fileName, rawUrl: `/api/demo/artifacts/${vendorId}?mode=raw`, details });
+    return Response.json({ kind: artifact.kind, fileName: artifact.fileName, rawUrl: `/api/demo/artifacts/${vendorId}?mode=raw`, details }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Supplier attachment is unavailable.' }, { status: 404 });
   }
