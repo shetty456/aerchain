@@ -1,10 +1,9 @@
 import 'server-only';
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
 import { processVendorResponse, type VendorProcessingStage } from '@/lib/ingestion/pipeline';
 import { procurementLog } from '@/lib/observability/logger';
+import { readRuntimeDocument, writeRuntimeDocument } from '@/lib/storage/runtime-documents';
 
 export type DemoVendorStatus = 'QUEUED' | VendorProcessingStage | 'READY' | 'FAILED';
 export type DemoRunState = {
@@ -29,7 +28,6 @@ export type DemoRunState = {
   }>;
 };
 
-const statePath = path.join(process.env.PIPELINE_CACHE_DIR || path.join(process.cwd(), '.demo-runtime'), 'event-run.json');
 const demoGlobal = globalThis as typeof globalThis & {
   __aerchainActiveWorkers?: Map<string, Promise<void>>;
   __aerchainWriteQueue?: Promise<void>;
@@ -38,20 +36,12 @@ const activeWorkers = demoGlobal.__aerchainActiveWorkers ??= new Map<string, Pro
 demoGlobal.__aerchainWriteQueue ??= Promise.resolve();
 
 async function readState(): Promise<DemoRunState | null> {
-  try {
-    return JSON.parse(await readFile(statePath, 'utf8')) as DemoRunState;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
+  return readRuntimeDocument<DemoRunState>('event-run');
 }
 
 async function writeState(state: DemoRunState) {
   const operation = demoGlobal.__aerchainWriteQueue!.then(async () => {
-    await mkdir(path.dirname(statePath), { recursive: true });
-    const temporary = `${statePath}.${crypto.randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, statePath);
+    await writeRuntimeDocument('event-run', state);
   });
   demoGlobal.__aerchainWriteQueue = operation.catch(() => undefined);
   await operation;

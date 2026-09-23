@@ -1,18 +1,15 @@
 import 'server-only';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
 import { applyClarification, getClarifications } from './clarification-manager';
 import { getDemoRun } from './run-manager';
 import { processVendorResponse } from '@/lib/ingestion/pipeline';
 import { analyzeProcurement, type AnalysisVendor } from '@/lib/procurement/analysis';
 import { getQualificationStatus } from '@/lib/procurement/qualification';
+import { readRuntimeDocument, writeRuntimeDocument } from '@/lib/storage/runtime-documents';
 
 export type AwardRecommendation = { id: string; status: 'DRAFT' | 'ACCEPTED'; createdAt: string; acceptedAt?: string; allocations: Array<{ lineId: string; item: string; quantity: number; vendorId: string; vendor: string; unitPrice: number; lineTotal: number }>; spendByVendor: Array<{ vendor: string; spend: number; lines: number }>; totalSpend: number; baselineVendor?: string; baselineSpend?: number; savings?: number; unawardedLines: number; unawardedLineIds: string[]; caveats: string[] };
-const awardPath = path.join(process.env.PIPELINE_CACHE_DIR || path.join(process.cwd(), '.demo-runtime'), 'award.json');
-
-export async function getAward() { try { return JSON.parse(await readFile(awardPath, 'utf8')) as AwardRecommendation; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; } }
-async function saveAward(award: AwardRecommendation) { await mkdir(path.dirname(awardPath), { recursive: true }); const temporary = `${awardPath}.${crypto.randomUUID()}.tmp`; await writeFile(temporary, JSON.stringify(award, null, 2)); await rename(temporary, awardPath); }
+export async function getAward() { return readRuntimeDocument<AwardRecommendation>('award'); }
+async function saveAward(award: AwardRecommendation) { await writeRuntimeDocument('award', award); }
 
 export async function createAward() {
   const run = await getDemoRun(); if (!run) throw new Error('Process supplier responses before creating an award recommendation.');

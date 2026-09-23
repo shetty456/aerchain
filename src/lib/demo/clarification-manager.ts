@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { z } from 'zod';
 import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
 import { procurementAiProvider } from '@/lib/ai/procurement-provider';
@@ -10,6 +8,7 @@ import { processVendorResponse } from '@/lib/ingestion/pipeline';
 import { procurementLog } from '@/lib/observability/logger';
 import { applyConfirmedClarifications } from '@/lib/procurement/clarification';
 import type { VendorResponse } from '@/lib/procurement/schemas';
+import { readRuntimeDocument, writeRuntimeDocument } from '@/lib/storage/runtime-documents';
 
 const questionSchema = z.object({
   subject: z.string(),
@@ -44,7 +43,6 @@ export type ClarificationRecord = {
   updatedAt: string;
 };
 
-const clarificationPath = path.join(process.env.PIPELINE_CACHE_DIR || path.join(process.cwd(), '.demo-runtime'), 'clarifications.json');
 const clarificationGlobal = globalThis as typeof globalThis & {
   __aerchainClarificationWorkers?: Map<string, Promise<void>>;
   __aerchainClarificationQueue?: Promise<void>;
@@ -53,19 +51,11 @@ const workers = clarificationGlobal.__aerchainClarificationWorkers ??= new Map<s
 clarificationGlobal.__aerchainClarificationQueue ??= Promise.resolve();
 
 async function readRecords(): Promise<Record<string, ClarificationRecord>> {
-  try {
-    return JSON.parse(await readFile(clarificationPath, 'utf8')) as Record<string, ClarificationRecord>;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    throw error;
-  }
+  return await readRuntimeDocument<Record<string, ClarificationRecord>>('clarifications') ?? {};
 }
 
 async function writeRecords(records: Record<string, ClarificationRecord>) {
-  await mkdir(path.dirname(clarificationPath), { recursive: true });
-  const temporary = `${clarificationPath}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  await rename(temporary, clarificationPath);
+  await writeRuntimeDocument('clarifications', records);
 }
 
 async function updateRecord(vendorId: string, update: Partial<ClarificationRecord>) {

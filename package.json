@@ -9,9 +9,11 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
-    "demo:artifacts": "tsx scripts/generate-demo-artifacts.ts"
+    "demo:artifacts": "tsx scripts/generate-demo-artifacts.ts",
+    "db:seed": "node --env-file=.env.local --import tsx scripts/seed-neon.ts"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "groq-sdk": "^1.6.0",
     "jsonrepair": "^3.15.0",
     "lucide-react": "^1.21.0",
