@@ -28,6 +28,7 @@ button { cursor: pointer; }
 .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-light); }
 .status-pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--surface); }
 .status-ready { border-color: #cae4d8; color: var(--green); background: var(--green-soft); }
+.status-error { border-color: #efcfcc; color: var(--red); background: var(--red-soft); }
 
 /* Subtle scrollbar — Notion style */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

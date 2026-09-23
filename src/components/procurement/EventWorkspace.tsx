@@ -2,54 +2,121 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, ArrowLeft, Check, ChevronDown, CircleHelp, FileSpreadsheet, LoaderCircle, Send, ShieldCheck } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronDown, Circle, CircleHelp, Clock3, FileText, LoaderCircle, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import type { SourcingEvent } from '@/lib/procurement/schemas';
 
 type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis';
+type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
+type VendorProgress = { state: VendorState; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string };
+
+const initialProgress = (event: SourcingEvent) => Object.fromEntries(
+  event.invitedVendors.map((vendor) => [vendor.id, { state: 'WAITING' as const }]),
+);
 
 export default function EventWorkspace({ event, aiConfigured }: { event: SourcingEvent; aiConfigured: boolean }) {
   const [tab, setTab] = useState<Tab>('RFx');
   const [expanded, setExpanded] = useState<string | null>('HW-001');
-  const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const [sent, setSent] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<Record<string, VendorProgress>>(() => initialProgress(event));
 
-  async function testHardestArtifact() {
-    setProcessing(true); setResult(null);
+  async function processVendor(vendorId: string) {
+    setProgress((current) => ({ ...current, [vendorId]: { state: 'PROCESSING' } }));
     try {
-      const response = await fetch('/api/demo/process/vendor-d', { method: 'POST' });
+      const response = await fetch(`/api/demo/process/${vendorId}`, { method: 'POST' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Processing failed.');
-      const count = payload.response.lineItems.filter((line: { normalizedUnitPrice: number | null }) => line.normalizedUnitPrice !== null).length;
-      setResult({ tone: 'success', message: `Sarvam processed the photographed rate card: ${count}/30 lines received normalized prices.` });
+      const lineItems = payload.response.lineItems as Array<{ normalizedUnitPrice: number | null; status: string }>;
+      setProgress((current) => ({
+        ...current,
+        [vendorId]: {
+          state: 'COMPLETE',
+          normalizedLines: lineItems.filter((line) => line.normalizedUnitPrice !== null).length,
+          exceptionLines: lineItems.filter((line) => !['VERIFIED', 'NORMALIZED'].includes(line.status)).length,
+          cached: Boolean(payload.ingestion.cached),
+        },
+      }));
     } catch (error) {
-      setResult({ tone: 'error', message: error instanceof Error ? error.message : 'Processing failed.' });
-    } finally { setProcessing(false); }
+      setProgress((current) => ({
+        ...current,
+        [vendorId]: { state: 'ERROR', error: error instanceof Error ? error.message : 'Processing failed.' },
+      }));
+    }
   }
+
+  async function sendRfx() {
+    if (running || sent || !aiConfigured) return;
+    setSent(true);
+    setRunning(true);
+    setTab('Responses');
+    setProgress(initialProgress(event));
+    for (const vendor of event.invitedVendors) await processVendor(vendor.id);
+    setRunning(false);
+  }
+
+  const completedCount = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
+  const errorCount = Object.values(progress).filter((item) => item.state === 'ERROR').length;
 
   return <div className="min-h-screen bg-[var(--surface)]">
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-white/95 backdrop-blur">
       <div className="flex h-14 items-center justify-between px-5">
-        <div className="flex items-center gap-4"><Link href="/" aria-label="Back to home" className="rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="h-5 w-px bg-[var(--line)]" /><div><p className="text-sm font-semibold tracking-tight">{event.title}</p><p className="text-[10px] text-[var(--muted)]">Draft · {event.id}</p></div></div>
-        <div className="flex items-center gap-3"><span className={`status-pill ${aiConfigured ? 'status-ready' : ''}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span><button className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3.5 py-2 text-xs font-semibold text-white"><Send size={13} /> Send RFx</button></div>
+        <div className="flex items-center gap-4"><Link href="/" aria-label="Back to home" className="rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="h-5 w-px bg-[var(--line)]" /><div><p className="text-sm font-semibold tracking-tight">{event.title}</p><p className="text-[10px] text-[var(--muted)]">{running ? 'Processing responses' : sent ? 'Responses received' : 'Draft'} · {event.id}</p></div></div>
+        <div className="flex items-center gap-3"><span className={`status-pill ${aiConfigured ? 'status-ready' : 'status-error'}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span><button disabled={!aiConfigured || sent || running} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55">{running ? <LoaderCircle className="animate-spin" size={13} /> : sent ? <Check size={13} /> : <Send size={13} />}{running ? `Processing ${Math.min(completedCount + errorCount + 1, 5)} of 5` : sent ? 'RFx sent' : 'Send RFx'}</button></div>
       </div>
-      <nav className="flex gap-6 px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`border-b-2 px-1 py-3 text-xs font-semibold ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}</button>)}</nav>
+      <nav className="flex gap-6 px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex items-center gap-2 border-b-2 px-1 py-3 text-xs font-semibold ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
     </header>
     <main className="mx-auto max-w-[1440px] px-6 py-7">
-      {tab === 'RFx' ? <>
-        <div className="mb-7 flex flex-wrap items-start justify-between gap-5"><div><p className="eyebrow">Request for quotation · {event.fiscalYear}</p><h1 className="mt-2 text-2xl font-semibold tracking-[-.025em]">{event.title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">{event.scope}</p></div><div className="flex gap-8 rounded-xl border border-[var(--line)] bg-white px-5 py-4"><Metric label="Lines" value="30" /><Metric label="Vendors" value="5" /><Metric label="Delivery" value="15 Apr 2027" /></div></div>
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">
-            <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h2 className="text-sm font-semibold">Line items</h2><p className="mt-1 text-xs text-[var(--muted)]">Requested specifications and quantities</p></div><span className="text-xs text-[var(--muted)]">Base currency · INR</span></div>
-            <div className="overflow-x-auto"><table className="w-full border-collapse text-left"><thead><tr className="bg-[var(--surface)] text-[10px] uppercase tracking-wider text-[var(--muted)]"><th className="w-24 px-5 py-3 font-semibold">Line</th><th className="px-3 py-3 font-semibold">Requested item</th><th className="w-32 px-3 py-3 font-semibold">Category</th><th className="w-24 px-5 py-3 text-right font-semibold">Quantity</th></tr></thead><tbody>{event.lineItems.map((line) => <LineRow key={line.id} line={line} open={expanded === line.id} onToggle={() => setExpanded(expanded === line.id ? null : line.id)} />)}</tbody></table></div>
-          </section>
-          <aside className="space-y-4">
-            <section className="rounded-xl border border-[var(--line)] bg-white p-5"><div className="mb-4 flex items-center gap-2"><ShieldCheck size={16} /><h2 className="text-sm font-semibold">Qualification gates</h2></div><div className="space-y-4">{event.qualificationQuestions.map((question) => <div key={question.id} className="flex gap-3"><div className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full ${question.hardGate ? 'bg-[var(--ink)] text-white' : 'border border-[var(--line)] text-[var(--muted)]'}`}>{question.hardGate ? <Check size={12} /> : <CircleHelp size={12} />}</div><div><p className="text-xs font-semibold">{question.label}</p><p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">{question.description}</p></div></div>)}</div><div className="mt-5 rounded-lg bg-[var(--surface)] p-3 text-[11px] leading-5 text-[var(--muted)]">Missing hard-gate answers remain <strong className="text-[var(--ink)]">Incomplete</strong>. They are never treated as failed.</div></section>
-            <section className="rounded-xl border border-[var(--line)] bg-white p-5"><h2 className="text-sm font-semibold">Invited vendors</h2><div className="mt-4 divide-y divide-[var(--line)]">{event.invitedVendors.map((vendor) => <div key={vendor.id} className="flex items-center justify-between py-3"><div><p className="text-xs font-semibold">{vendor.name}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{vendor.contactName}</p></div><span className="status-pill">{vendor.responseFormat}</span></div>)}</div></section>
-            <section className="rounded-xl border border-[var(--line)] bg-white p-5"><div className="flex items-center gap-2"><FileSpreadsheet size={16} /><h2 className="text-sm font-semibold">Ingestion proof</h2></div><p className="mt-2 text-xs leading-5 text-[var(--muted)]">Process the photographed rate card through Sarvam Vision and the canonical normalization pipeline.</p><button disabled={processing} onClick={testHardestArtifact} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2.5 text-xs font-semibold disabled:opacity-50">{processing ? <LoaderCircle className="animate-spin" size={14} /> : <FileSpreadsheet size={14} />} {processing ? 'Processing image…' : 'Test image extraction'}</button>{result && <div className={`mt-3 flex gap-2 rounded-lg p-3 text-[11px] leading-5 ${result.tone === 'error' ? 'bg-[var(--red-soft)] text-[var(--red)]' : 'bg-[var(--green-soft)] text-[var(--green)]'}`}><AlertCircle className="mt-0.5 shrink-0" size={13} />{result.message}</div>}</section>
-          </aside>
-        </div>
-      </> : <EmptyTab tab={tab} />}
+      {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
+      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={processVendor} />}
+      {(tab === 'Comparison' || tab === 'Analysis') && <EmptyTab tab={tab} />}
     </main>
+  </div>;
+}
+
+function RfxView({ event, expanded, setExpanded, aiConfigured, sent, sendRfx }: { event: SourcingEvent; expanded: string | null; setExpanded: (line: string | null) => void; aiConfigured: boolean; sent: boolean; sendRfx: () => void }) {
+  return <>
+    <section className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--line-strong)] bg-white px-5 py-4">
+      <div><p className="text-sm font-semibold">{sent ? 'RFx sent to five vendors' : 'Ready to send'}</p><p className="mt-1 text-xs text-[var(--muted)]">{sent ? 'Open Responses to follow processing and review any failures.' : '30 line items and five invited vendors are ready for the simulated response journey.'}</p></div>
+      {!sent && <button disabled={!aiConfigured} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><Send size={14} /> Send RFx to 5 vendors</button>}
+    </section>
+    <div className="mb-7 flex flex-wrap items-start justify-between gap-5"><div><p className="eyebrow">Request for quotation · {event.fiscalYear}</p><h1 className="mt-2 text-2xl font-semibold tracking-[-.025em]">{event.title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">{event.scope}</p></div><div className="flex gap-8 rounded-xl border border-[var(--line)] bg-white px-5 py-4"><Metric label="Lines" value="30" /><Metric label="Vendors" value="5" /><Metric label="Delivery" value="15 Apr 2027" /></div></div>
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">
+        <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h2 className="text-sm font-semibold">Line items</h2><p className="mt-1 text-xs text-[var(--muted)]">Click a line to inspect its requested specifications</p></div><span className="text-xs text-[var(--muted)]">Base currency · INR</span></div>
+        <div className="overflow-x-auto"><table className="w-full border-collapse text-left"><thead><tr className="bg-[var(--surface)] text-[10px] uppercase tracking-wider text-[var(--muted)]"><th className="w-24 px-5 py-3 font-semibold">Line</th><th className="px-3 py-3 font-semibold">Requested item</th><th className="w-32 px-3 py-3 font-semibold">Category</th><th className="w-24 px-5 py-3 text-right font-semibold">Quantity</th></tr></thead><tbody>{event.lineItems.map((line) => <LineRow key={line.id} line={line} open={expanded === line.id} onToggle={() => setExpanded(expanded === line.id ? null : line.id)} />)}</tbody></table></div>
+      </section>
+      <aside className="space-y-4">
+        <section className="rounded-xl border border-[var(--line)] bg-white p-5"><div className="mb-4 flex items-center gap-2"><ShieldCheck size={16} /><h2 className="text-sm font-semibold">Qualification gates</h2></div><div className="space-y-4">{event.qualificationQuestions.map((question) => <div key={question.id} className="flex gap-3"><div className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full ${question.hardGate ? 'bg-[var(--ink)] text-white' : 'border border-[var(--line)] text-[var(--muted)]'}`}>{question.hardGate ? <Check size={12} /> : <CircleHelp size={12} />}</div><div><p className="text-xs font-semibold">{question.label}</p><p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">{question.description}</p></div></div>)}</div><div className="mt-5 rounded-lg bg-[var(--surface)] p-3 text-[11px] leading-5 text-[var(--muted)]">Missing hard-gate answers remain <strong className="text-[var(--ink)]">Incomplete</strong>. They are never treated as failed.</div></section>
+        <section className="rounded-xl border border-[var(--line)] bg-white p-5"><h2 className="text-sm font-semibold">Invited vendors</h2><div className="mt-4 divide-y divide-[var(--line)]">{event.invitedVendors.map((vendor) => <div key={vendor.id} className="flex items-center justify-between py-3"><div><p className="text-xs font-semibold">{vendor.name}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{vendor.contactName}</p></div><span className="status-pill">{vendor.responseFormat}</span></div>)}</div></section>
+      </aside>
+    </div>
+  </>;
+}
+
+function ResponsesView({ event, sent, running, progress, aiConfigured, sendRfx, retry }: { event: SourcingEvent; sent: boolean; running: boolean; progress: Record<string, VendorProgress>; aiConfigured: boolean; sendRfx: () => void; retry: (vendorId: string) => Promise<void> }) {
+  if (!sent) return <div className="mx-auto flex min-h-[62vh] max-w-md items-center justify-center text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Send size={18} /></div><h1 className="mt-4 text-xl font-semibold">Send the RFx to begin</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Five simulated vendor responses will arrive and be converted into comparable procurement data.</p><button disabled={!aiConfigured} onClick={sendRfx} className="mt-5 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Send RFx to 5 vendors</button></div></div>;
+  const complete = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
+  const errors = Object.values(progress).filter((item) => item.state === 'ERROR').length;
+  return <div className="mx-auto max-w-5xl">
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-2xl font-semibold">{running ? 'Processing vendor responses' : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm text-[var(--muted)]">{running ? 'Responses are processed one vendor at a time to stay within provider limits.' : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div>
+    <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">{event.invitedVendors.map((vendor, index) => <VendorResponseRow key={vendor.id} vendor={vendor} progress={progress[vendor.id]} index={index} retry={() => retry(vendor.id)} retryDisabled={running} />)}</div>
+    <div className="mt-4 flex items-start gap-3 rounded-xl border border-[var(--line)] bg-white p-4"><ShieldCheck className="mt-0.5 shrink-0 text-[var(--green)]" size={16} /><div><p className="text-xs font-semibold">Each result remains inspectable</p><p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">Original values, normalization assumptions, exceptions, and source evidence will remain attached when these responses enter comparison.</p></div></div>
+  </div>;
+}
+
+function VendorResponseRow({ vendor, progress, index, retry, retryDisabled }: { vendor: SourcingEvent['invitedVendors'][number]; progress: VendorProgress; index: number; retry: () => void; retryDisabled: boolean }) {
+  const status = {
+    WAITING: { label: 'Waiting', detail: 'Response queued', icon: <Circle size={15} />, className: 'text-[var(--muted)]' },
+    PROCESSING: { label: 'Processing', detail: 'Extracting, mapping, and normalizing', icon: <LoaderCircle className="animate-spin" size={15} />, className: 'text-[var(--ink)]' },
+    COMPLETE: { label: 'Ready', detail: `${progress.normalizedLines}/30 lines priced · ${progress.exceptionLines} exceptions${progress.cached ? ' · reused validated results' : ''}`, icon: <CheckCircle2 size={15} />, className: 'text-[var(--green)]' },
+    ERROR: { label: 'Needs attention', detail: progress.error || 'Processing failed', icon: <AlertCircle size={15} />, className: 'text-[var(--red)]' },
+  }[progress.state];
+  return <div className={`grid gap-4 border-t border-[var(--line)] px-5 py-4 first:border-t-0 md:grid-cols-[32px_minmax(0,1fr)_120px_minmax(220px,1fr)_auto] md:items-center ${progress.state === 'PROCESSING' ? 'bg-[#fafbf9]' : ''}`}>
+    <div className="hidden size-7 items-center justify-center rounded-full bg-[var(--surface)] text-[10px] font-semibold text-[var(--muted)] md:flex">{index + 1}</div>
+    <div><p className="text-xs font-semibold">{vendor.name}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{vendor.contactName}</p></div>
+    <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]"><FileText size={13} /> {vendor.responseFormat}</div>
+    <div className={`flex items-start gap-2 ${status.className}`}>{status.icon}<div><p className="text-xs font-semibold">{status.label}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--muted)]">{status.detail}</p></div></div>
+    {progress.state === 'ERROR' ? <button disabled={retryDisabled} onClick={retry} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-45"><RefreshCw size={12} /> Retry</button> : progress.state === 'WAITING' ? <Clock3 size={14} className="text-[var(--muted-light)]" /> : <span />}
   </div>;
 }
 
@@ -59,4 +126,4 @@ function LineRow({ line, open, onToggle }: { line: SourcingEvent['lineItems'][nu
   return <><tr onClick={onToggle} className="cursor-pointer border-t border-[var(--line)] hover:bg-[#fafbf9]"><td className="px-5 py-4 font-mono text-[11px] text-[var(--muted)]">{line.id}</td><td className="px-3 py-4"><div className="flex items-center gap-2 text-xs font-medium">{line.requestedProduct}<ChevronDown size={13} className={`text-[var(--muted)] transition ${open ? 'rotate-180' : ''}`} /></div></td><td className="px-3 py-4 text-[11px] text-[var(--muted)]">{line.category}</td><td className="px-5 py-4 text-right text-xs font-medium">{line.quantity} {line.unit}</td></tr>{open && <tr className="bg-[var(--surface)]"><td /><td colSpan={3} className="px-3 py-4"><div className="grid gap-5 md:grid-cols-2"><div><p className="eyebrow mb-2">Mandatory</p><ul className="space-y-1.5">{line.mandatorySpecifications.map((spec) => <li key={spec} className="flex gap-2 text-[11px] text-[var(--muted)]"><Check size={12} className="mt-0.5 text-[var(--green)]" />{spec}</li>)}</ul></div><div><p className="eyebrow mb-2">Optional</p><ul className="space-y-1.5">{line.optionalSpecifications.map((spec) => <li key={spec} className="text-[11px] text-[var(--muted)]">{spec}</li>)}</ul></div></div></td></tr>}</>;
 }
 
-function EmptyTab({ tab }: { tab: Exclude<Tab, 'RFx'> }) { return <div className="flex min-h-[60vh] items-center justify-center"><div className="max-w-sm text-center"><p className="eyebrow">Next checkpoint</p><h2 className="mt-3 text-xl font-semibold">{tab} workspace</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">This section will become active after the RFx is sent and supplier responses are processed.</p></div></div>; }
+function EmptyTab({ tab }: { tab: 'Comparison' | 'Analysis' }) { return <div className="flex min-h-[60vh] items-center justify-center"><div className="max-w-sm text-center"><p className="eyebrow">Available after processing</p><h2 className="mt-3 text-xl font-semibold">{tab} workspace</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Process supplier responses first. This workspace will then use their normalized, validated data.</p></div></div>; }
