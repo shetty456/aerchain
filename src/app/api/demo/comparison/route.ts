@@ -15,7 +15,7 @@ export async function GET() {
   const clarifications = await getClarifications();
   const vendors = [];
   for (const vendor of readyVendors) {
-    const result = await processVendorResponse(vendor.id);
+    const result = await processVendorResponse(vendor.id, undefined, undefined, { cacheScope: run.cacheScope });
     const response = applyClarification(result.response, clarifications[vendor.id]);
     vendors.push({ vendor, qualification: getQualificationStatus(response), response, clarification: clarifications[vendor.id] ?? null });
   }

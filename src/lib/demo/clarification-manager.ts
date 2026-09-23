@@ -9,6 +9,7 @@ import { procurementLog } from '@/lib/observability/logger';
 import { applyConfirmedClarifications } from '@/lib/procurement/clarification';
 import type { VendorResponse } from '@/lib/procurement/schemas';
 import { readRuntimeDocument, writeRuntimeDocument } from '@/lib/storage/runtime-documents';
+import { getDemoRun } from './run-manager';
 
 const questionSchema = z.object({
   subject: z.string(),
@@ -42,13 +43,6 @@ export type ClarificationRecord = {
   history: Array<{ status: string; at: string }>;
   updatedAt: string;
 };
-
-const clarificationGlobal = globalThis as typeof globalThis & {
-  __aerchainClarificationWorkers?: Map<string, Promise<void>>;
-  __aerchainClarificationQueue?: Promise<void>;
-};
-const workers = clarificationGlobal.__aerchainClarificationWorkers ??= new Map<string, Promise<void>>();
-clarificationGlobal.__aerchainClarificationQueue ??= Promise.resolve();
 
 async function readRecords(): Promise<Record<string, ClarificationRecord>> {
   return await readRuntimeDocument<Record<string, ClarificationRecord>>('clarifications') ?? {};
@@ -87,7 +81,8 @@ function simulatedReply(vendorId: string, issues: ClarificationIssue[]) {
 
 async function executeClarification(vendorId: string) {
   try {
-    const result = await processVendorResponse(vendorId);
+    const run = await getDemoRun();
+    const result = await processVendorResponse(vendorId, undefined, undefined, { cacheScope: run?.cacheScope });
     const records = await readRecords();
     const previousResolutions = records[vendorId]?.resolutions ?? [];
     const previousQualificationResolutions = records[vendorId]?.qualificationResolutions ?? [];
@@ -169,12 +164,8 @@ export async function startClarification(vendorId: string) {
     updatedAt: now,
   };
   await writeRecords(records);
-  const worker = clarificationGlobal.__aerchainClarificationQueue!
-    .then(() => executeClarification(vendorId))
-    .finally(() => workers.delete(vendorId));
-  clarificationGlobal.__aerchainClarificationQueue = worker.catch(() => undefined);
-  workers.set(vendorId, worker);
-  return records[vendorId];
+  await executeClarification(vendorId);
+  return (await readRecords())[vendorId];
 }
 
 export async function getClarifications() {

@@ -30,6 +30,7 @@ export default function ComparisonWorkspace() {
   const [exceptionsOnly, setExceptionsOnly] = useState(false);
   const [selected, setSelected] = useState<SelectedCell | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [clarifyingVendor, setClarifyingVendor] = useState<string | null>(null);
 
   async function loadComparison() {
     const response = await fetch('/api/demo/comparison', { cache: 'no-store' });
@@ -59,6 +60,7 @@ export default function ComparisonWorkspace() {
 
   async function clarify(vendorId: string) {
     setActionError(null);
+    setClarifyingVendor(vendorId);
     try {
       const response = await fetch(`/api/demo/clarifications/${vendorId}`, { method: 'POST' });
       const payload = await response.json();
@@ -66,6 +68,8 @@ export default function ComparisonWorkspace() {
       await loadComparison();
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : 'Clarification could not be started.');
+    } finally {
+      setClarifyingVendor(null);
     }
   }
 
@@ -99,8 +103,8 @@ export default function ComparisonWorkspace() {
         const clarifiedCount = clarification?.resolutions?.filter((item) => item.confirmed && validLineIds.has(item.rfxLineId)).length ?? 0;
         const clarifiedQualificationCount = clarification?.qualificationResolutions?.filter((item) => item.answer !== 'UNKNOWN').length ?? 0;
         const totalClarified = clarifiedCount + clarifiedQualificationCount;
-        const active = clarification && !['COMPLETED', 'FAILED'].includes(clarification.status);
-        const activeLabel = clarification?.status === 'GENERATING' ? 'Drafting questions' : clarification?.status === 'SENT' ? 'Sent to vendor' : clarification?.status === 'RESPONSE_RECEIVED' ? 'Reply received' : clarification?.status === 'REPROCESSING' ? 'Reprocessing reply' : null;
+        const active = clarifyingVendor === vendor.id || Boolean(clarification && !['COMPLETED', 'FAILED'].includes(clarification.status));
+        const activeLabel = clarifyingVendor === vendor.id ? 'Clarifying and reprocessing' : clarification?.status === 'GENERATING' ? 'Drafting questions' : clarification?.status === 'SENT' ? 'Sent to vendor' : clarification?.status === 'RESPONSE_RECEIVED' ? 'Reply received' : clarification?.status === 'REPROCESSING' ? 'Reprocessing reply' : null;
         const label = activeLabel
           ?? (qualification.status === 'DISQUALIFIED' ? `Stopped · Explicitly failed: ${qualification.failed.join(', ')}`
             : qualification.status === 'INCOMPLETE' ? `Qualification must be resolved first · Missing: ${qualification.unknown.join(', ')}`
@@ -108,7 +112,7 @@ export default function ComparisonWorkspace() {
                 : clarification?.status === 'COMPLETED' ? `${totalClarified} clarified · ${totalGapCount} line gaps remain`
                   : `${factualCount} line gaps · qualification passed`);
         const canClarify = qualification.status !== 'DISQUALIFIED' && totalGapCount > 0;
-        return <div key={vendor.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-xs font-semibold">{vendor.name}</p><p className={`mt-1 text-[10px] ${qualification.status === 'DISQUALIFIED' || clarification?.status === 'FAILED' ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>{label}</p></div>{canClarify && <button disabled={clarificationActive} onClick={() => clarify(vendor.id)} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-wait disabled:opacity-55">{active ? <LoaderCircle className="animate-spin" size={12} /> : <Send size={12} />}{active ? 'Working…' : qualification.status === 'INCOMPLETE' ? 'Clarify qualification' : clarification?.status === 'FAILED' ? 'Retry clarification' : totalClarified ? 'Clarify next 3' : 'Send clarification'}</button>}</div>;
+        return <div key={vendor.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-xs font-semibold">{vendor.name}</p><p className={`mt-1 text-[10px] ${qualification.status === 'DISQUALIFIED' || clarification?.status === 'FAILED' ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>{label}</p></div>{canClarify && <button disabled={clarificationActive || clarifyingVendor !== null} onClick={() => clarify(vendor.id)} className="flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-[11px] font-semibold disabled:cursor-wait disabled:opacity-55">{active ? <LoaderCircle className="animate-spin" size={12} /> : <Send size={12} />}{active ? 'Working…' : qualification.status === 'INCOMPLETE' ? 'Clarify qualification' : clarification?.status === 'FAILED' ? 'Retry clarification' : totalClarified ? 'Clarify next 3' : 'Send clarification'}</button>}</div>;
       })}</div>
     </section>
 

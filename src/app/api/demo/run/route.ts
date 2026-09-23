@@ -11,7 +11,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({})) as { action?: string };
-    const run = body.action === 'REPLAY_SHOWCASE' ? await replayDemoRun() : await startDemoRun();
+    const run = body.action === 'REPLAY_SHOWCASE'
+      ? await replayDemoRun()
+      : await startDemoRun({ fresh: body.action === 'START_FRESH' });
     return Response.json({ run }, { status: 202 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Could not start the response journey.' }, { status: 409 });

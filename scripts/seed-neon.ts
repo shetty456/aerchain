@@ -15,6 +15,11 @@ async function main() {
         VALUES (${key}, ${JSON.stringify(payload)}::jsonb, NOW())
         ON CONFLICT (document_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       `;
+      await sql`
+        INSERT INTO aerchain_runtime_documents (document_key, payload, updated_at)
+        VALUES (${`showcase-${key}`}, ${JSON.stringify(payload)}::jsonb, NOW())
+        ON CONFLICT (document_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      `;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }

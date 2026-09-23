@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronDown, Circle, CircleHelp, Clock3, FileText, LoaderCircle, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import type { SourcingEvent } from '@/lib/procurement/schemas';
@@ -28,6 +28,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
   const [progress, setProgress] = useState<Record<string, VendorProgress>>(() => initialProgress(event));
   const [actionError, setActionError] = useState<string | null>(null);
   const [runMode, setRunMode] = useState<RunPayload['mode']>();
+  const stepInFlight = useRef(false);
 
   function applyRun(run: RunPayload | null) {
     if (!run) return;
@@ -68,6 +69,30 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
     }, 1_500);
     return () => clearInterval(timer);
   // The polling lifecycle is intentionally controlled only by run status.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runStatus]);
+
+  useEffect(() => {
+    if (runStatus !== 'RUNNING') return;
+    let disposed = false;
+    async function advance() {
+      if (stepInFlight.current) return;
+      stepInFlight.current = true;
+      try {
+        const response = await fetch('/api/demo/run/step', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Processing could not continue.');
+        if (!disposed) applyRun(payload.run);
+      } catch (error) {
+        if (!disposed) setActionError(error instanceof Error ? error.message : 'Processing could not continue.');
+      } finally {
+        stepInFlight.current = false;
+      }
+    }
+    void advance();
+    const timer = setInterval(() => void advance(), 2_500);
+    return () => { disposed = true; clearInterval(timer); };
+  // Processing advances one durable vendor step at a time.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runStatus]);
 
@@ -118,6 +143,24 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
     }
   }
 
+  async function startFreshRun() {
+    if (!aiConfigured || runStatus === 'RUNNING') return;
+    const confirmed = window.confirm('Start a fresh live run? This calls Sarvam and Groq, consumes tokens, and replaces the current working run. The saved showcase remains available through Replay showcase.');
+    if (!confirmed) return;
+    setActionError(null);
+    setTab('Responses');
+    try {
+      const response = await fetch('/api/demo/run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'START_FRESH' }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Could not start a fresh run.');
+      applyRun(payload.run);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not start a fresh run.');
+    }
+  }
+
   const sent = runStatus !== null;
   const running = runStatus === 'RUNNING';
   const completedCount = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
@@ -134,7 +177,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
     <main className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-7">
       {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
       {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
-      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} replaying={runMode === 'SHOWCASE_REPLAY'} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} />}
+      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} replaying={runMode === 'SHOWCASE_REPLAY'} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} startFresh={startFreshRun} />}
       {tab === 'Comparison' && (completedCount ? <ComparisonWorkspace /> : <EmptyTab tab="Comparison" />)}
       {tab === 'Analysis' && (completedCount ? <AnalysisWorkspace /> : <EmptyTab tab="Analysis" />)}
     </main>
@@ -161,12 +204,12 @@ function RfxView({ event, expanded, setExpanded, aiConfigured, sent, sendRfx }: 
   </>;
 }
 
-function ResponsesView({ event, sent, running, replaying, progress, aiConfigured, sendRfx, retry }: { event: SourcingEvent; sent: boolean; running: boolean; replaying: boolean; progress: Record<string, VendorProgress>; aiConfigured: boolean; sendRfx: () => void; retry: (vendorId: string) => Promise<void> }) {
+function ResponsesView({ event, sent, running, replaying, progress, aiConfigured, sendRfx, retry, startFresh }: { event: SourcingEvent; sent: boolean; running: boolean; replaying: boolean; progress: Record<string, VendorProgress>; aiConfigured: boolean; sendRfx: () => void; retry: (vendorId: string) => Promise<void>; startFresh: () => Promise<void> }) {
   if (!sent) return <div className="mx-auto flex min-h-[62vh] max-w-md items-center justify-center text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Send size={18} /></div><h1 className="mt-4 text-xl font-semibold">Send the RFx to begin</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Five simulated vendor responses will arrive and be converted into comparable procurement data.</p><button disabled={!aiConfigured} onClick={sendRfx} className="mt-5 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Send RFx to 5 vendors</button></div></div>;
   const complete = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
   const errors = Object.values(progress).filter((item) => item.state === 'ERROR').length;
   return <div className="mx-auto max-w-5xl">
-    <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-2xl font-semibold">{running ? (replaying ? 'Replaying the response journey' : 'Processing vendor responses') : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm text-[var(--muted)]">{running ? (replaying ? 'Using saved results only · no AI requests or tokens' : 'Responses are processed one vendor at a time to stay within provider limits.') : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div>
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-xl font-semibold sm:text-2xl">{running ? (replaying ? 'Replaying the response journey' : 'Processing vendor responses') : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{running ? (replaying ? 'Using saved results only · no AI requests or tokens' : 'Responses are processed one vendor at a time and checkpointed after every successful stage.') : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="flex items-end gap-4"><button disabled={!aiConfigured || running} onClick={() => void startFresh()} className="rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold disabled:opacity-45">Start fresh live run</button><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div></div>
     <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">{event.invitedVendors.map((vendor, index) => <VendorResponseRow key={vendor.id} vendor={vendor} progress={progress[vendor.id]} index={index} retry={() => retry(vendor.id)} retryDisabled={running} />)}</div>
     <AuditTrail active={running} />
     <div className="mt-4 flex items-start gap-3 rounded-xl border border-[var(--line)] bg-white p-4"><ShieldCheck className="mt-0.5 shrink-0 text-[var(--green)]" size={16} /><div><p className="text-xs font-semibold">Each result remains inspectable</p><p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">Original values, normalization assumptions, exceptions, and source evidence will remain attached when these responses enter comparison.</p></div></div>

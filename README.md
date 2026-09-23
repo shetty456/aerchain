@@ -72,9 +72,16 @@ GROQ_TIMEOUT_SECONDS=120
 GROQ_MAPPING_CONCURRENCY=1
 
 PROCUREMENT_LOG_LEVEL=debug
+DATABASE_URL=
 ```
 
-`GROQ_MAPPING_CONCURRENCY=1` is deliberate for low token-per-minute limits. Missing keys are surfaced in the workspace; secrets are never sent to the browser. `.env.local` is gitignored.
+`GROQ_MAPPING_CONCURRENCY=1` is deliberate for low token-per-minute limits. `DATABASE_URL` enables Neon persistence for Vercel; without it the same repository falls back to `.demo-runtime/` locally. Missing keys are surfaced in the workspace, secrets are never sent to the browser, and `.env.local` is gitignored.
+
+After adding a Neon connection, seed the schema and immutable showcase once:
+
+```bash
+npm run db:seed
+```
 
 ## Demo flow
 
@@ -89,7 +96,9 @@ For a first live processing run:
 7. Create, review, and explicitly accept the award recommendation.
 8. Export the recommendation as PDF.
 
-For later presentations, select **Replay showcase**. Replay changes only the visible response journey and uses the saved, validated result counts. It makes no Sarvam or Groq requests, preserves clarifications and the accepted award, and logs `aiRequests: 0` on completion.
+For later presentations, select **Replay showcase**. Replay restores the immutable saved result, changes only the visible response journey, makes no Sarvam or Groq requests, preserves its clarifications and accepted award, and logs `aiRequests: 0` on completion.
+
+Use **Start fresh live run** only when genuine provider processing is required. The UI warns before consuming tokens. Each supplier is processed in a bounded request, every successful stage is checkpointed, and a failed retry resumes inside that run without touching the saved showcase.
 
 ## Real versus simulated
 
@@ -122,11 +131,11 @@ The fixed demonstration exchange rate is visible in Comparison. It is an inspect
 
 ## Persistence and caching
 
-Runtime state is stored under `.demo-runtime/` and is intentionally gitignored. Extraction, mapping batches, canonical mapping, and normalization are cached separately after successful validation. A failed later stage can therefore be retried without paying for successful earlier stages again.
+On Vercel, runtime documents and validated pipeline stages are stored in Neon Postgres using JSONB. Without `DATABASE_URL`, development falls back to `.demo-runtime/`, which remains gitignored. Extraction, mapping batches, canonical mapping, and normalization are cached separately after successful validation. A failed later stage can therefore be retried without paying for successful earlier stages again.
 
-Showcase replay does not delete or rebuild runtime data. To preserve a presentation-ready state, back up `.demo-runtime/` outside the repository before intentionally clearing local data.
+Fresh runs receive an isolated cache scope, so they cannot overwrite the seeded showcase. Replay restores the saved run, clarification history, and award before presenting its token-free timeline.
 
-Production persistence would use a transactional database and object store. Prototype persistence is deliberately local and single-user.
+The browser advances processing through resumable server requests instead of relying on an in-memory background worker that may disappear between Vercel invocations. A production system would additionally use a durable job queue and object storage for uploaded supplier files.
 
 ## Quality checks
 
@@ -141,8 +150,8 @@ The test suite covers deterministic normalization, qualification semantics, ambi
 
 ## Known limitations and deliberate scope cuts
 
-- Local filesystem state is unsuitable for multi-instance or serverless production deployment.
-- The background workflow is designed for a local interview demo, not a durable production queue.
+- The Vercel workflow is resumable but browser-driven; production processing would use a durable job queue.
+- The demo has one shared active event rather than authenticated, isolated buyer workspaces.
 - The fixed FX rate and fictional supplier replies are demonstration assumptions.
 - Analysis intent generation still requires Groq; deterministic results do not.
 - The prototype implements one sourcing event and one buyer persona.

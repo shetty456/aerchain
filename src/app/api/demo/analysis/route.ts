@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const clarifications = await getClarifications();
     const vendors: AnalysisVendor[] = [];
     for (const vendor of ready) {
-      const result = await processVendorResponse(vendor.id);
+      const result = await processVendorResponse(vendor.id, undefined, undefined, { cacheScope: run.cacheScope });
       const response = applyClarification(result.response, clarifications[vendor.id]);
       vendors.push({ id: vendor.id, name: vendor.name, qualification: getQualificationStatus(response).status, response });
     }

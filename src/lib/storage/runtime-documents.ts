@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ensureRuntimeSchema, getSql, hasDatabase } from './neon';
 
@@ -38,4 +38,17 @@ export async function writeRuntimeDocument<T>(key: string, payload: T) {
   const temporary = `${destination}.${crypto.randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(temporary, destination);
+}
+
+export async function deleteRuntimeDocument(key: string) {
+  if (hasDatabase()) {
+    await ensureRuntimeSchema();
+    await getSql()`DELETE FROM aerchain_runtime_documents WHERE document_key = ${key}`;
+    return;
+  }
+  try {
+    await unlink(localPath(key));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
