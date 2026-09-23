@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
@@ -94,4 +95,9 @@ export function getArtifactForVendor(vendorId: string) {
   const artifact = artifacts.find((candidate) => candidate.vendorId === vendorId);
   if (!artifact) throw new Error(`No response artifact is configured for ${vendorId}.`);
   return artifact;
+}
+
+export async function getArtifactFingerprint(artifact: ArtifactDefinition) {
+  const bytes = await readFile(path.join(artifactDirectory, artifact.fileName));
+  return createHash('sha256').update(bytes).digest('hex');
 }
