@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronDown, Circle, CircleHelp, Clock3, FileText, LoaderCircle, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import type { SourcingEvent } from '@/lib/procurement/schemas';
 
 type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis';
 type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
-type VendorProgress = { state: VendorState; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string };
+type VendorProgress = { state: VendorState; stage?: string; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string };
+type RunPayload = {
+  status: 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_ERRORS';
+  vendors: Record<string, { status: 'QUEUED' | 'EXTRACTING' | 'MAPPING' | 'NORMALIZING' | 'READY' | 'FAILED'; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string }>;
+};
 
 const initialProgress = (event: SourcingEvent) => Object.fromEntries(
   event.invitedVendors.map((vendor) => [vendor.id, { state: 'WAITING' as const }]),
@@ -16,44 +20,82 @@ const initialProgress = (event: SourcingEvent) => Object.fromEntries(
 export default function EventWorkspace({ event, aiConfigured }: { event: SourcingEvent; aiConfigured: boolean }) {
   const [tab, setTab] = useState<Tab>('RFx');
   const [expanded, setExpanded] = useState<string | null>('HW-001');
-  const [sent, setSent] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [runStatus, setRunStatus] = useState<RunPayload['status'] | null>(null);
   const [progress, setProgress] = useState<Record<string, VendorProgress>>(() => initialProgress(event));
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  async function processVendor(vendorId: string) {
-    setProgress((current) => ({ ...current, [vendorId]: { state: 'PROCESSING' } }));
+  function applyRun(run: RunPayload | null) {
+    if (!run) return;
+    setRunStatus(run.status);
+    setProgress(Object.fromEntries(event.invitedVendors.map((vendor) => {
+      const item = run.vendors[vendor.id];
+      if (!item || item.status === 'QUEUED') return [vendor.id, { state: 'WAITING' } satisfies VendorProgress];
+      if (item.status === 'READY') return [vendor.id, { state: 'COMPLETE', normalizedLines: item.normalizedLines, exceptionLines: item.exceptionLines, cached: item.cached } satisfies VendorProgress];
+      if (item.status === 'FAILED') return [vendor.id, { state: 'ERROR', error: item.error } satisfies VendorProgress];
+      return [vendor.id, { state: 'PROCESSING', stage: item.status } satisfies VendorProgress];
+    })));
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    async function refresh() {
+      try {
+        const response = await fetch('/api/demo/run', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!disposed) applyRun(payload.run);
+      } catch { /* The empty state remains usable if status restoration fails. */ }
+    }
+    void refresh();
+    return () => { disposed = true; };
+  // The event dataset is static for this workspace.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (runStatus !== 'RUNNING') return;
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch('/api/demo/run', { cache: 'no-store' });
+        const payload = await response.json();
+        applyRun(payload.run);
+      } catch { /* Keep the last known state and try again on the next interval. */ }
+    }, 1_500);
+    return () => clearInterval(timer);
+  // The polling lifecycle is intentionally controlled only by run status.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runStatus]);
+
+  async function sendRfx() {
+    if (runStatus || !aiConfigured) return;
+    setActionError(null);
+    setRunStatus('RUNNING');
+    setTab('Responses');
+    setProgress(initialProgress(event));
     try {
-      const response = await fetch(`/api/demo/process/${vendorId}`, { method: 'POST' });
+      const response = await fetch('/api/demo/run', { method: 'POST' });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'Processing failed.');
-      const lineItems = payload.response.lineItems as Array<{ normalizedUnitPrice: number | null; status: string }>;
-      setProgress((current) => ({
-        ...current,
-        [vendorId]: {
-          state: 'COMPLETE',
-          normalizedLines: lineItems.filter((line) => line.normalizedUnitPrice !== null).length,
-          exceptionLines: lineItems.filter((line) => !['VERIFIED', 'NORMALIZED'].includes(line.status)).length,
-          cached: Boolean(payload.ingestion.cached),
-        },
-      }));
+      if (!response.ok) throw new Error(payload.error || 'Could not start the RFx run.');
+      applyRun(payload.run);
     } catch (error) {
-      setProgress((current) => ({
-        ...current,
-        [vendorId]: { state: 'ERROR', error: error instanceof Error ? error.message : 'Processing failed.' },
-      }));
+      setRunStatus(null);
+      setActionError(error instanceof Error ? error.message : 'Could not start the RFx run.');
     }
   }
 
-  async function sendRfx() {
-    if (running || sent || !aiConfigured) return;
-    setSent(true);
-    setRunning(true);
-    setTab('Responses');
-    setProgress(initialProgress(event));
-    for (const vendor of event.invitedVendors) await processVendor(vendor.id);
-    setRunning(false);
+  async function retryVendor(vendorId: string) {
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/demo/run/${vendorId}`, { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Could not retry this vendor.');
+      applyRun(payload.run);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not retry this vendor.');
+    }
   }
 
+  const sent = runStatus !== null;
+  const running = runStatus === 'RUNNING';
   const completedCount = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
   const errorCount = Object.values(progress).filter((item) => item.state === 'ERROR').length;
 
@@ -66,8 +108,9 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       <nav className="flex gap-6 px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex items-center gap-2 border-b-2 px-1 py-3 text-xs font-semibold ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
     </header>
     <main className="mx-auto max-w-[1440px] px-6 py-7">
+      {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
       {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
-      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={processVendor} />}
+      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} />}
       {(tab === 'Comparison' || tab === 'Analysis') && <EmptyTab tab={tab} />}
     </main>
   </div>;
@@ -107,7 +150,7 @@ function ResponsesView({ event, sent, running, progress, aiConfigured, sendRfx, 
 function VendorResponseRow({ vendor, progress, index, retry, retryDisabled }: { vendor: SourcingEvent['invitedVendors'][number]; progress: VendorProgress; index: number; retry: () => void; retryDisabled: boolean }) {
   const status = {
     WAITING: { label: 'Waiting', detail: 'Response queued', icon: <Circle size={15} />, className: 'text-[var(--muted)]' },
-    PROCESSING: { label: 'Processing', detail: 'Extracting, mapping, and normalizing', icon: <LoaderCircle className="animate-spin" size={15} />, className: 'text-[var(--ink)]' },
+    PROCESSING: { label: progress.stage === 'EXTRACTING' ? 'Extracting document' : progress.stage === 'MAPPING' ? 'Mapping response' : 'Normalizing prices', detail: progress.stage === 'EXTRACTING' ? 'Reading the supplier file' : progress.stage === 'MAPPING' ? 'Matching quoted items to RFx lines' : 'Applying deterministic pricing rules', icon: <LoaderCircle className="animate-spin" size={15} />, className: 'text-[var(--ink)]' },
     COMPLETE: { label: 'Ready', detail: `${progress.normalizedLines}/30 lines priced · ${progress.exceptionLines} exceptions${progress.cached ? ' · reused validated results' : ''}`, icon: <CheckCircle2 size={15} />, className: 'text-[var(--green)]' },
     ERROR: { label: 'Needs attention', detail: progress.error || 'Processing failed', icon: <AlertCircle size={15} />, className: 'text-[var(--red)]' },
   }[progress.state];

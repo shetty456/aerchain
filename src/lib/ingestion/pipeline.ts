@@ -28,8 +28,8 @@ const extractedSourceCacheSchema = z.object({
 });
 
 function groqMappingConcurrency() {
-  const configured = Number(process.env.GROQ_MAPPING_CONCURRENCY || 2);
-  return Number.isInteger(configured) ? Math.min(4, Math.max(1, configured)) : 2;
+  const configured = Number(process.env.GROQ_MAPPING_CONCURRENCY || 1);
+  return Number.isInteger(configured) ? Math.min(4, Math.max(1, configured)) : 1;
 }
 
 async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
@@ -48,6 +48,9 @@ async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency
 type MappingTaskResult =
   | { kind: 'metadata'; data: z.infer<typeof rawMetadataBatchSchema> }
   | { kind: 'batch'; batchNumber: number; data: z.infer<typeof rawLineBatchSchema> };
+
+export type VendorProcessingStage = 'EXTRACTING' | 'MAPPING' | 'NORMALIZING';
+type ProcessingOptions = { onStage?: (stage: VendorProcessingStage) => void | Promise<void> };
 
 function lineBatchPrompt(source: string, fileName: string, artifactId: string, lineOffset: number) {
   const rfx = windowsHardwareEvent.lineItems.slice(lineOffset, lineOffset + LINE_BATCH_SIZE).map((line) => ({
@@ -116,7 +119,7 @@ async function mapInBatches(
       schema: rawMetadataBatchSchema,
       system: PROCUREMENT_GUARDRAIL,
       prompt: metadataPrompt(source, fileName, artifactId),
-      maxTokens: 4_000,
+      maxTokens: 2_500,
     });
     await writePipelineStage(vendorId, 'mapping-metadata', metadataHash, generated);
     procurementLog.info('vendor.mapping.metadata.cached', { requestId, vendorId });
@@ -142,7 +145,7 @@ async function mapInBatches(
       schema: rawLineBatchSchema,
       system: PROCUREMENT_GUARDRAIL,
       prompt: lineBatchPrompt(source, fileName, artifactId, offset),
-      maxTokens: 6_000,
+      maxTokens: 4_000,
     });
     await writePipelineStage(vendorId, stage, batchHash, generated);
     procurementLog.info('vendor.mapping.batch.cached', {
@@ -183,12 +186,13 @@ async function mapInBatches(
   });
 }
 
-export async function processVendorResponse(vendorId: string, provider: AiProvider = procurementAiProvider, requestId = crypto.randomUUID()) {
+export async function processVendorResponse(vendorId: string, provider: AiProvider = procurementAiProvider, requestId = crypto.randomUUID(), options: ProcessingOptions = {}) {
   const startedAt = Date.now();
   const artifact = getArtifactForVendor(vendorId);
   const artifactHash = await getArtifactFingerprint(artifact);
   const cachedStages: string[] = [];
   procurementLog.info('vendor.processing.started', { requestId, vendorId, artifactId: artifact.id, fileName: artifact.fileName, kind: artifact.kind });
+  await options.onStage?.('EXTRACTING');
   const extractionStartedAt = Date.now();
   let source = await readPipelineStage(vendorId, 'extraction', artifactHash, extractedSourceCacheSchema);
   if (source) {
@@ -201,6 +205,7 @@ export async function processVendorResponse(vendorId: string, provider: AiProvid
     procurementLog.info('vendor.extraction.cached', { requestId, vendorId, visionJobId: source.visionJobId });
   }
   procurementLog.info('vendor.extraction.completed', { requestId, vendorId, method: source.extractionMethod, visionJobId: source.visionJobId, sourceCharacters: source.content.length, elapsedMs: elapsedSince(extractionStartedAt) });
+  await options.onStage?.('MAPPING');
   const mappingStartedAt = Date.now();
   const mappingHash = `${artifactHash}:${process.env.GROQ_MODEL || 'openai/gpt-oss-20b'}:${PIPELINE_SCHEMA_VERSION}`;
   let raw = await readPipelineStage(vendorId, 'mapping', mappingHash, rawExtractedResponseSchema);
@@ -214,6 +219,7 @@ export async function processVendorResponse(vendorId: string, provider: AiProvid
     procurementLog.info('vendor.mapping.cached', { requestId, vendorId, extractedLines: raw.lineItems.length });
   }
   procurementLog.info('vendor.mapping.validated', { requestId, vendorId, extractedLines: raw.lineItems.length, ambiguityCount: raw.ambiguities.length, elapsedMs: elapsedSince(mappingStartedAt) });
+  await options.onStage?.('NORMALIZING');
   const normalizationStartedAt = Date.now();
   const normalizationHash = `${mappingHash}:normalization-v1`;
   let response = await readPipelineStage(vendorId, 'normalization', normalizationHash, vendorResponseSchema);
