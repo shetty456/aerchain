@@ -86,11 +86,19 @@ function simulatedReply(vendorId: string, issues: Array<{ lineId: string; issue:
 
 async function executeClarification(vendorId: string) {
   try {
-    const { response } = await processVendorResponse(vendorId);
-    const issues = response.ambiguities
-      .filter((ambiguity): ambiguity is typeof ambiguity & { lineId: string } => ambiguity.type === 'FACTUAL' && ambiguity.resolution === 'CLARIFY_VENDOR' && Boolean(ambiguity.lineId))
-      .slice(0, 3)
-      .map((ambiguity) => ({ lineId: ambiguity.lineId, issue: ambiguity.issue }));
+    const result = await processVendorResponse(vendorId);
+    const records = await readRecords();
+    const previousResolutions = records[vendorId]?.resolutions ?? [];
+    const response = applyConfirmedClarifications(result.response, previousResolutions);
+    const validLineIds = new Set(windowsHardwareEvent.lineItems.map((line) => line.id));
+    const alreadyConfirmed = new Set(previousResolutions.filter((item) => item.confirmed).map((item) => item.rfxLineId));
+    const uniqueIssues = new Map<string, string>();
+    for (const ambiguity of response.ambiguities) {
+      if (ambiguity.type !== 'FACTUAL' || ambiguity.resolution !== 'CLARIFY_VENDOR' || !ambiguity.lineId) continue;
+      if (!validLineIds.has(ambiguity.lineId) || alreadyConfirmed.has(ambiguity.lineId) || uniqueIssues.has(ambiguity.lineId)) continue;
+      uniqueIssues.set(ambiguity.lineId, ambiguity.issue);
+    }
+    const issues = [...uniqueIssues].slice(0, 3).map(([lineId, issue]) => ({ lineId, issue }));
     if (!issues.length) throw new Error('This vendor has no factual line-item gaps available for autonomous clarification.');
 
     const question = await procurementAiProvider.generateStructured({
@@ -115,7 +123,11 @@ async function executeClarification(vendorId: string) {
       prompt: `Interpret this clarification reply only against the listed factual issues. Mark confirmed true only where the reply explicitly confirms the fact.\n\nIssues:\n${JSON.stringify(issues)}\n\nVendor reply:\n${reply}`,
       maxTokens: 1_500,
     });
-    await updateRecord(vendorId, { status: 'COMPLETED', resolutions: interpreted.resolutions });
+    const merged = new Map(previousResolutions.map((item) => [item.rfxLineId, item]));
+    for (const resolution of interpreted.resolutions) {
+      if (validLineIds.has(resolution.rfxLineId)) merged.set(resolution.rfxLineId, resolution);
+    }
+    await updateRecord(vendorId, { status: 'COMPLETED', resolutions: [...merged.values()] });
     procurementLog.info('clarification.completed', { vendorId, resolutionCount: interpreted.resolutions.length });
   } catch (error) {
     await updateRecord(vendorId, { status: 'FAILED', error: error instanceof Error ? error.message : 'Clarification failed.' });
@@ -126,9 +138,17 @@ async function executeClarification(vendorId: string) {
 export async function startClarification(vendorId: string) {
   if (!windowsHardwareEvent.invitedVendors.some((vendor) => vendor.id === vendorId)) throw new Error('Unknown vendor.');
   const records = await readRecords();
-  if (records[vendorId] && !['FAILED'].includes(records[vendorId].status)) return records[vendorId];
+  if (records[vendorId] && !['FAILED', 'COMPLETED'].includes(records[vendorId].status)) return records[vendorId];
   const now = new Date().toISOString();
-  records[vendorId] = { vendorId, status: 'GENERATING', history: [{ status: 'GENERATING', at: now }], updatedAt: now };
+  const previous = records[vendorId];
+  records[vendorId] = {
+    ...previous,
+    vendorId,
+    status: 'GENERATING',
+    error: undefined,
+    history: [...(previous?.history ?? []), { status: 'GENERATING', at: now }],
+    updatedAt: now,
+  };
   await writeRecords(records);
   const worker = clarificationGlobal.__aerchainClarificationQueue!
     .then(() => executeClarification(vendorId))
