@@ -27,6 +27,28 @@ const extractedSourceCacheSchema = z.object({
   extractionMethod: z.enum(['LOCAL_STRUCTURAL', 'SARVAM_VISION']),
 });
 
+function groqMappingConcurrency() {
+  const configured = Number(process.env.GROQ_MAPPING_CONCURRENCY || 2);
+  return Number.isInteger(configured) ? Math.min(4, Math.max(1, configured)) : 2;
+}
+
+async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
+  const results = new Array<T>(tasks.length);
+  let nextTask = 0;
+  async function worker() {
+    while (nextTask < tasks.length) {
+      const taskIndex = nextTask++;
+      results[taskIndex] = await tasks[taskIndex]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+  return results;
+}
+
+type MappingTaskResult =
+  | { kind: 'metadata'; data: z.infer<typeof rawMetadataBatchSchema> }
+  | { kind: 'batch'; batchNumber: number; data: z.infer<typeof rawLineBatchSchema> };
+
 function lineBatchPrompt(source: string, fileName: string, artifactId: string, lineOffset: number) {
   const rfx = windowsHardwareEvent.lineItems.slice(lineOffset, lineOffset + LINE_BATCH_SIZE).map((line) => ({
     id: line.id,
@@ -82,48 +104,72 @@ async function mapInBatches(
   requestId: string,
 ): Promise<RawExtractedResponse> {
   const metadataHash = `${mappingHash}:metadata`;
-  let metadata = await readPipelineStage(vendorId, 'mapping-metadata', metadataHash, rawMetadataBatchSchema);
-  if (metadata) {
-    procurementLog.info('vendor.mapping.metadata.cache_hit', { requestId, vendorId });
-  } else {
+  const metadataTask = async () => {
+    const cached = await readPipelineStage(vendorId, 'mapping-metadata', metadataHash, rawMetadataBatchSchema);
+    if (cached) {
+      procurementLog.info('vendor.mapping.metadata.cache_hit', { requestId, vendorId });
+      return { kind: 'metadata' as const, data: cached };
+    }
     procurementLog.info('vendor.mapping.metadata.started', { requestId, vendorId });
-    metadata = await provider.generateStructured({
+    const generated = await provider.generateStructured({
       schemaName: 'vendor_response_metadata',
       schema: rawMetadataBatchSchema,
       system: PROCUREMENT_GUARDRAIL,
       prompt: metadataPrompt(source, fileName, artifactId),
       maxTokens: 4_000,
     });
-    await writePipelineStage(vendorId, 'mapping-metadata', metadataHash, metadata);
+    await writePipelineStage(vendorId, 'mapping-metadata', metadataHash, generated);
     procurementLog.info('vendor.mapping.metadata.cached', { requestId, vendorId });
-  }
+    return { kind: 'metadata' as const, data: generated };
+  };
 
-  const lineItems: RawExtractedResponse['lineItems'] = [];
-  const ambiguities: RawExtractedResponse['ambiguities'] = [...metadata.ambiguities];
-  for (let offset = 0; offset < windowsHardwareEvent.lineItems.length; offset += LINE_BATCH_SIZE) {
+  const offsets = Array.from(
+    { length: Math.ceil(windowsHardwareEvent.lineItems.length / LINE_BATCH_SIZE) },
+    (_, index) => index * LINE_BATCH_SIZE,
+  );
+  const batchTasks = offsets.map((offset) => async () => {
     const batchNumber = offset / LINE_BATCH_SIZE + 1;
     const stage = `mapping-lines-${batchNumber}` as const;
     const batchHash = `${mappingHash}:lines:${offset}:${LINE_BATCH_SIZE}`;
-    let batch = await readPipelineStage(vendorId, stage, batchHash, rawLineBatchSchema);
-    if (batch) {
+    const cached = await readPipelineStage(vendorId, stage, batchHash, rawLineBatchSchema);
+    if (cached) {
       procurementLog.info('vendor.mapping.batch.cache_hit', { requestId, vendorId, batchNumber });
-    } else {
-      procurementLog.info('vendor.mapping.batch.started', { requestId, vendorId, batchNumber });
-      batch = await provider.generateStructured({
-        schemaName: `vendor_response_lines_${batchNumber}`,
-        schema: rawLineBatchSchema,
-        system: PROCUREMENT_GUARDRAIL,
-        prompt: lineBatchPrompt(source, fileName, artifactId, offset),
-        maxTokens: 6_000,
-      });
-      await writePipelineStage(vendorId, stage, batchHash, batch);
-      procurementLog.info('vendor.mapping.batch.cached', {
-        requestId,
-        vendorId,
-        batchNumber,
-        extractedLines: batch.lineItems.length,
-      });
+      return { kind: 'batch' as const, batchNumber, data: cached };
     }
+    procurementLog.info('vendor.mapping.batch.started', { requestId, vendorId, batchNumber });
+    const generated = await provider.generateStructured({
+      schemaName: `vendor_response_lines_${batchNumber}`,
+      schema: rawLineBatchSchema,
+      system: PROCUREMENT_GUARDRAIL,
+      prompt: lineBatchPrompt(source, fileName, artifactId, offset),
+      maxTokens: 6_000,
+    });
+    await writePipelineStage(vendorId, stage, batchHash, generated);
+    procurementLog.info('vendor.mapping.batch.cached', {
+      requestId,
+      vendorId,
+      batchNumber,
+      extractedLines: generated.lineItems.length,
+    });
+    return { kind: 'batch' as const, batchNumber, data: generated };
+  });
+
+  const concurrency = groqMappingConcurrency();
+  const tasks: Array<() => Promise<MappingTaskResult>> = [metadataTask, ...batchTasks];
+  procurementLog.info('vendor.mapping.parallel.started', { requestId, vendorId, taskCount: tasks.length, concurrency });
+  const mapped = await runWithConcurrency(tasks, concurrency);
+  procurementLog.info('vendor.mapping.parallel.completed', { requestId, vendorId, taskCount: tasks.length, concurrency });
+
+  const metadata = mapped.find((result) => result.kind === 'metadata')?.data;
+  if (!metadata || !('qualificationAnswers' in metadata)) throw new Error('Vendor metadata mapping did not complete.');
+  const batches = mapped
+    .filter((result): result is Extract<MappingTaskResult, { kind: 'batch' }> => result.kind === 'batch')
+    .sort((left, right) => left.batchNumber - right.batchNumber)
+    .map((result) => result.data);
+
+  const lineItems: RawExtractedResponse['lineItems'] = [];
+  const ambiguities: RawExtractedResponse['ambiguities'] = [...metadata.ambiguities];
+  for (const batch of batches) {
     lineItems.push(...batch.lineItems);
     ambiguities.push(...batch.ambiguities);
   }
