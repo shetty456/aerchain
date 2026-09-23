@@ -17,6 +17,7 @@ export interface StructuredGenerationRequest<TSchema extends z.ZodType> {
   schema: TSchema;
   system: string;
   prompt: string;
+  maxTokens?: number;
 }
 
 export interface AiProvider {

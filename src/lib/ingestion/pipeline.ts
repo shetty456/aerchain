@@ -3,7 +3,7 @@ import 'server-only';
 import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
 import { PROCUREMENT_GUARDRAIL } from '@/lib/ai/prompts';
 import type { AiProvider } from '@/lib/ai/provider';
-import { sarvamProvider } from '@/lib/ai/sarvam';
+import { procurementAiProvider } from '@/lib/ai/procurement-provider';
 import { extractSource, getArtifactForVendor } from './source-artifacts';
 import { normalizeResponse } from './canonicalize';
 import { rawExtractedResponseSchema } from '@/lib/procurement/schemas';
@@ -37,7 +37,7 @@ Vendor source:
 ${source}`;
 }
 
-export async function processVendorResponse(vendorId: string, provider: AiProvider = sarvamProvider, requestId = crypto.randomUUID()) {
+export async function processVendorResponse(vendorId: string, provider: AiProvider = procurementAiProvider, requestId = crypto.randomUUID()) {
   const startedAt = Date.now();
   const artifact = getArtifactForVendor(vendorId);
   procurementLog.info('vendor.processing.started', { requestId, vendorId, artifactId: artifact.id, fileName: artifact.fileName, kind: artifact.kind });
@@ -50,6 +50,7 @@ export async function processVendorResponse(vendorId: string, provider: AiProvid
     schema: rawExtractedResponseSchema,
     system: PROCUREMENT_GUARDRAIL,
     prompt: mapPrompt(source.content, artifact.fileName, artifact.id),
+    maxTokens: 16_000,
   });
   procurementLog.info('vendor.mapping.validated', { requestId, vendorId, extractedLines: raw.lineItems.length, ambiguityCount: raw.ambiguities.length, elapsedMs: elapsedSince(mappingStartedAt) });
   const normalizationStartedAt = Date.now();
@@ -65,8 +66,8 @@ export async function processVendorResponse(vendorId: string, provider: AiProvid
     ingestion: {
       extractionMethod: source.extractionMethod,
       visionJobId: source.visionJobId,
-      provider: 'sarvam',
-      model: process.env.SARVAM_MODEL || 'sarvam-105b',
+      provider: 'sarvam-vision + groq',
+      model: process.env.GROQ_MODEL || 'openai/gpt-oss-20b',
       cached: false,
     },
   };

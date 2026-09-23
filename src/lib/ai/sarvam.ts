@@ -94,9 +94,11 @@ export class SarvamProvider implements AiProvider {
           { role: 'system', content: request.system },
           { role: 'user', content: request.prompt },
         ],
-        reasoning_effort: 'low',
+        // The SDK documentation allows None/null to disable reasoning, although
+        // the generated TypeScript enum currently omits null from its type.
+        reasoning_effort: null as never,
         temperature: 0.1,
-        max_tokens: 12_000,
+        max_tokens: request.maxTokens ?? 6_000,
         response_format: {
           type: 'json_schema',
           json_schema: {
@@ -109,8 +111,37 @@ export class SarvamProvider implements AiProvider {
       });
 
       const content = response.choices[0]?.message.content;
-      if (!content) throw new Error('Sarvam returned no structured content.');
-      const parsed = request.schema.parse(JSON.parse(content));
+      if (!content) {
+        const choice = response.choices[0];
+        procurementLog.error('sarvam.mapping.empty_content', {
+          schema: request.schemaName,
+          finishReason: choice?.finish_reason,
+          reasoningCharacters: choice?.message.reasoning_content?.length ?? 0,
+          completionTokens: response.usage?.completion_tokens,
+          promptTokens: response.usage?.prompt_tokens,
+          totalTokens: response.usage?.total_tokens,
+          elapsedMs: elapsedSince(startedAt),
+        });
+        throw new Error(`Sarvam returned no structured content (finish reason: ${choice?.finish_reason ?? 'unknown'}).`);
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(content);
+      } catch (error) {
+        const choice = response.choices[0];
+        procurementLog.error('sarvam.mapping.invalid_json', {
+          schema: request.schemaName,
+          finishReason: choice?.finish_reason,
+          contentCharacters: content.length,
+          reasoningCharacters: choice?.message.reasoning_content?.length ?? 0,
+          completionTokens: response.usage?.completion_tokens,
+          promptTokens: response.usage?.prompt_tokens,
+          totalTokens: response.usage?.total_tokens,
+          elapsedMs: elapsedSince(startedAt),
+        });
+        throw error;
+      }
+      const parsed = request.schema.parse(json);
       procurementLog.info('sarvam.mapping.completed', { schema: request.schemaName, model, elapsedMs: elapsedSince(startedAt) });
       return parsed;
     } catch (error) {

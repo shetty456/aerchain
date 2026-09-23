@@ -30,7 +30,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-white/95 backdrop-blur">
       <div className="flex h-14 items-center justify-between px-5">
         <div className="flex items-center gap-4"><Link href="/" aria-label="Back to home" className="rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="h-5 w-px bg-[var(--line)]" /><div><p className="text-sm font-semibold tracking-tight">{event.title}</p><p className="text-[10px] text-[var(--muted)]">Draft · {event.id}</p></div></div>
-        <div className="flex items-center gap-3"><span className={`status-pill ${aiConfigured ? 'status-ready' : ''}`}>{aiConfigured ? 'Sarvam connected' : 'Sarvam key required'}</span><button className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3.5 py-2 text-xs font-semibold text-white"><Send size={13} /> Send RFx</button></div>
+        <div className="flex items-center gap-3"><span className={`status-pill ${aiConfigured ? 'status-ready' : ''}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span><button className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3.5 py-2 text-xs font-semibold text-white"><Send size={13} /> Send RFx</button></div>
       </div>
       <nav className="flex gap-6 px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`border-b-2 px-1 py-3 text-xs font-semibold ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}</button>)}</nav>
     </header>
