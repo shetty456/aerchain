@@ -54,6 +54,23 @@ function buildPlan(question: string, operation: AnalysisPlan['operation'], vendo
   };
 }
 
+export async function GET() {
+  const run = await getDemoRun();
+  if (!run) return Response.json({ error: 'No sourcing run is available.' }, { status: 409 });
+  const clarifications = await getClarifications();
+  const version = hash({
+    runId: run.runId,
+    vendors: Object.entries(run.vendors).map(([vendorId, vendor]) => ({
+      vendorId, status: vendor.status, updatedAt: vendor.updatedAt,
+      cacheScope: getVendorCacheScope(run, vendorId) ?? null,
+    })),
+    clarifications: Object.entries(clarifications).map(([vendorId, record]) => ({
+      vendorId, status: record.status, updatedAt: record.updatedAt,
+    })),
+  }).slice(0, 48);
+  return Response.json({ version, runId: run.runId, updatedAt: run.updatedAt }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({})) as { question?: string };

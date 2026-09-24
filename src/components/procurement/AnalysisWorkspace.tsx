@@ -18,22 +18,40 @@ export default function AnalysisWorkspace() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [restored, setRestored] = useState(false);
+  const [contextVersion, setContextVersion] = useState<string | null>(null);
+  const [dataChanged, setDataChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    queueMicrotask(() => {
-      try { setMessages(JSON.parse(localStorage.getItem("aerchain-analysis-chat-v1") ?? "[]")); } catch { setMessages([]); }
-      setRestored(true);
-    });
+    let disposed = false;
+    fetch("/api/demo/analysis", { cache: "no-store" })
+      .then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error); return payload as { version: string }; })
+      .then(({ version }) => {
+        if (disposed) return;
+        const previousVersion = localStorage.getItem("aerchain-analysis-current-version");
+        const storageKey = `aerchain-analysis-chat-v2-${version}`;
+        try { setMessages(JSON.parse(localStorage.getItem(storageKey) ?? "[]")); } catch { setMessages([]); }
+        setDataChanged(Boolean(previousVersion && previousVersion !== version));
+        setContextVersion(version);
+        setRestored(true);
+        localStorage.setItem("aerchain-analysis-current-version", version);
+        localStorage.removeItem("aerchain-analysis-chat-v1");
+      })
+      .catch(() => {
+        if (disposed) return;
+        setContextVersion("current"); setRestored(true);
+      });
+    return () => { disposed = true; };
   }, []);
   useEffect(() => {
-    if (restored) localStorage.setItem("aerchain-analysis-chat-v1", JSON.stringify(messages));
+    if (restored && contextVersion) localStorage.setItem(`aerchain-analysis-chat-v2-${contextVersion}`, JSON.stringify(messages));
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [messages, restored]);
+  }, [messages, restored, contextVersion]);
   async function ask(value = question) {
-    if (!value.trim() || loading) return;
+    if (!value.trim() || loading || !restored) return;
     const asked = value.trim();
+    setDataChanged(false);
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text: asked }]);
     setQuestion("");
     setLoading(true);
@@ -58,6 +76,7 @@ export default function AnalysisWorkspace() {
   }
   return (
     <div className="mx-auto max-w-3xl">
+      {dataChanged && <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs leading-5 text-blue-900"><p className="font-semibold">Supplier data has changed</p><p className="mt-1">This is a new analysis conversation. Earlier answers were based on the previous comparison and are not shown as current results.</p></div>}
       {messages.length === 0 ? <div className="flex min-h-[48vh] flex-col justify-center text-center"><div className="mx-auto flex size-10 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Bot size={17} /></div><h1 className="mt-4 text-xl font-semibold sm:text-2xl">What do you want to know?</h1><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--muted)]">Ask about suppliers, prices, exceptions, or award scenarios. Calculations use the normalized comparison—not model arithmetic.</p><div className="mx-auto mt-6 grid w-full max-w-2xl gap-2 text-left sm:grid-cols-3">
         {suggestions.map((item) => (
           <button
@@ -82,7 +101,7 @@ export default function AnalysisWorkspace() {
         />
         <button
           onClick={() => void ask()}
-          disabled={loading}
+          disabled={loading || !restored}
           className="flex size-10 items-center justify-center rounded-lg bg-[var(--ink)] text-white disabled:opacity-50"
         >
           {loading ? (
