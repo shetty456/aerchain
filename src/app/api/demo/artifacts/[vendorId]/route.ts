@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
 import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
-import { getDemoRun } from '@/lib/demo/run-manager';
+import { getDemoRun, getVendorCacheScope } from '@/lib/demo/run-manager';
 import { processVendorResponse } from '@/lib/ingestion/pipeline';
 import { getArtifactForVendor, readArtifactBytes } from '@/lib/ingestion/source-artifacts';
 
@@ -28,7 +28,7 @@ function cellText(value: ExcelJS.CellValue) {
 async function getExtractedDetails(vendorId: string) {
   const run = await getDemoRun();
   if (!run || run.vendors[vendorId]?.status !== 'READY') return null;
-  const { response } = await processVendorResponse(vendorId, undefined, undefined, { cacheScope: run.cacheScope });
+  const { response } = await processVendorResponse(vendorId, undefined, undefined, { cacheScope: getVendorCacheScope(run, vendorId) });
   const questions = new Map(windowsHardwareEvent.qualificationQuestions.map((question) => [question.id, question.label]));
   return {
     qualification: response.qualificationAnswers.map((item) => ({

@@ -11,7 +11,7 @@ type VendorResult = { normalizedLines: number; exceptionLines: number };
 export type DemoRunState = {
   runId: string;
   eventId: string;
-  mode?: 'LIVE' | 'SHOWCASE_REPLAY';
+  mode?: 'LIVE' | 'SHOWCASE_REPLAY' | 'SINGLE_VENDOR_LIVE';
   fresh?: boolean;
   cacheScope?: string;
   status: 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_ERRORS';
@@ -25,6 +25,7 @@ export type DemoRunState = {
     error?: string;
     updatedAt: string;
     history?: Array<{ status: DemoVendorStatus; at: string }>;
+    cacheScope?: string;
   }>;
   replayResults?: Record<string, VendorResult>;
 };
@@ -88,6 +89,17 @@ export async function getDemoRun() {
   return readState();
 }
 
+export function getVendorCacheScope(run: DemoRunState, vendorId: string) {
+  return run.vendors[vendorId]?.cacheScope ?? run.cacheScope;
+}
+
+async function resetVendorClarification(vendorId: string) {
+  const records = await readRuntimeDocument<Record<string, unknown>>('clarifications') ?? {};
+  if (!(vendorId in records)) return;
+  delete records[vendorId];
+  await writeRuntimeDocument('clarifications', records);
+}
+
 const replayPause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function finishIfSettled(runId: string) {
@@ -123,7 +135,7 @@ async function advanceReplay(state: DemoRunState, vendorId: string) {
 async function advanceLive(state: DemoRunState, vendorId: string) {
   try {
     const result = await processVendorResponse(vendorId, undefined, crypto.randomUUID(), {
-      cacheScope: state.cacheScope,
+      cacheScope: getVendorCacheScope(state, vendorId),
       onStage: (status) => updateVendor(state.runId, vendorId, { status, error: undefined }),
     });
     const lines = result.response.lineItems;
@@ -171,6 +183,42 @@ export async function replayDemoRun() {
   state.replayResults = replayResults;
   await writeState(state);
   procurementLog.info('demo.replay.created', { runId: state.runId, orchestration: 'resumable-request' });
+  return state;
+}
+
+export async function startSingleVendorLiveRun(vendorId: string) {
+  if (!windowsHardwareEvent.invitedVendors.some((vendor) => vendor.id === vendorId)) throw new Error('Select a valid vendor response.');
+  const current = await readState();
+  if (current?.status === 'RUNNING') throw new Error('A response journey is already running.');
+  const baseline = current ?? await readRuntimeDocument<DemoRunState>('showcase-event-run');
+  if (!baseline) throw new Error('Load the saved showcase before processing one response live.');
+  for (const vendor of windowsHardwareEvent.invitedVendors) {
+    if (vendor.id === vendorId) continue;
+    if (baseline.vendors[vendor.id]?.status !== 'READY') throw new Error('The other four saved vendor responses must be ready before starting a one-vendor live run.');
+  }
+  const now = new Date().toISOString();
+  const runId = crypto.randomUUID();
+  const vendors = Object.fromEntries(windowsHardwareEvent.invitedVendors.map((vendor) => {
+    const previous = baseline.vendors[vendor.id];
+    if (vendor.id === vendorId) return [vendor.id, {
+      status: 'QUEUED' as const, updatedAt: now, cached: false, cacheScope: runId,
+      history: [{ status: 'QUEUED' as const, at: now }],
+    }];
+    return [vendor.id, {
+      ...previous,
+      status: 'READY' as const,
+      updatedAt: now,
+      cacheScope: previous.cacheScope ?? baseline.cacheScope,
+    }];
+  }));
+  const state: DemoRunState = {
+    runId, eventId: windowsHardwareEvent.id, mode: 'SINGLE_VENDOR_LIVE', fresh: true,
+    status: 'RUNNING', createdAt: now, updatedAt: now, vendors,
+  };
+  await resetVendorClarification(vendorId);
+  await deleteRuntimeDocument('award');
+  await writeState(state);
+  procurementLog.info('demo.single_vendor_live.created', { runId, vendorId, preservedVendorCount: 4 });
   return state;
 }
 

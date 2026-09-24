@@ -1,4 +1,4 @@
-import { getDemoRun, replayDemoRun, startDemoRun } from '@/lib/demo/run-manager';
+import { getDemoRun, replayDemoRun, startDemoRun, startSingleVendorLiveRun } from '@/lib/demo/run-manager';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,9 +10,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => ({})) as { action?: string };
+    const body = await request.json().catch(() => ({})) as { action?: string; vendorId?: string };
     const run = body.action === 'REPLAY_SHOWCASE'
       ? await replayDemoRun()
+      : body.action === 'START_SINGLE_VENDOR_LIVE'
+        ? await startSingleVendorLiveRun(body.vendorId ?? '')
       : await startDemoRun({ fresh: body.action === 'START_FRESH' });
     return Response.json({ run }, { status: 202 });
   } catch (error) {

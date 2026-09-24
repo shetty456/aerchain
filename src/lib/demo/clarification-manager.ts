@@ -9,7 +9,7 @@ import { procurementLog } from '@/lib/observability/logger';
 import { applyConfirmedClarifications } from '@/lib/procurement/clarification';
 import type { VendorResponse } from '@/lib/procurement/schemas';
 import { readRuntimeDocument, writeRuntimeDocument } from '@/lib/storage/runtime-documents';
-import { getDemoRun } from './run-manager';
+import { getDemoRun, getVendorCacheScope } from './run-manager';
 
 const questionSchema = z.object({
   subject: z.string(),
@@ -85,7 +85,7 @@ function simulatedReply(vendorId: string, issues: ClarificationIssue[]) {
 async function executeClarification(vendorId: string) {
   try {
     const run = await getDemoRun();
-    const result = await processVendorResponse(vendorId, undefined, undefined, { cacheScope: run?.cacheScope });
+    const result = await processVendorResponse(vendorId, undefined, undefined, { cacheScope: run ? getVendorCacheScope(run, vendorId) : undefined });
     const records = await readRecords();
     const previousResolutions = records[vendorId]?.resolutions ?? [];
     const previousQualificationResolutions = records[vendorId]?.qualificationResolutions ?? [];

@@ -14,7 +14,7 @@ type Tab = 'RFx' | 'Responses' | 'Comparison' | 'Analysis' | 'Award';
 type VendorState = 'WAITING' | 'PROCESSING' | 'COMPLETE' | 'ERROR';
 type VendorProgress = { state: VendorState; stage?: string; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string };
 type RunPayload = {
-  mode?: 'LIVE' | 'SHOWCASE_REPLAY';
+  mode?: 'LIVE' | 'SHOWCASE_REPLAY' | 'SINGLE_VENDOR_LIVE';
   status: 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_ERRORS';
   vendors: Record<string, { status: 'QUEUED' | 'EXTRACTING' | 'MAPPING' | 'NORMALIZING' | 'READY' | 'FAILED'; normalizedLines?: number; exceptionLines?: number; cached?: boolean; error?: string }>;
 };
@@ -174,21 +174,20 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
     }
   }
 
-  async function startFreshRun() {
+  async function startSingleVendorLive(vendorId: string) {
     if (!aiConfigured || runStatus === 'RUNNING') return;
-    const confirmed = window.confirm('Start a fresh live run? This calls Sarvam and Groq, consumes tokens, and replaces the current working run. The saved showcase remains available through Replay showcase.');
-    if (!confirmed) return;
     setActionError(null);
     setTab('Responses');
     try {
       const response = await fetch('/api/demo/run', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'START_FRESH' }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'START_SINGLE_VENDOR_LIVE', vendorId }),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'Could not start a fresh run.');
+      if (!response.ok) throw new Error(payload.error || 'Could not start live processing.');
       applyRun(payload.run);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Could not start a fresh run.');
+      setActionError(error instanceof Error ? error.message : 'Could not start live processing.');
+      throw error;
     }
   }
 
@@ -201,7 +200,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-white/95 backdrop-blur">
       <div className="flex min-h-14 items-center justify-between gap-2 px-3 py-2 sm:px-5">
         <div className="flex min-w-0 items-center gap-2 sm:gap-4"><Link href="/" aria-label="Back to home" className="shrink-0 rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="hidden h-5 w-px bg-[var(--line)] sm:block" /><div className="min-w-0"><p className="truncate text-xs font-semibold tracking-tight sm:text-sm">{event.title}</p><p className="truncate text-[9px] text-[var(--muted)] sm:text-[10px]">{running ? 'Processing responses' : sent ? 'Responses received' : 'Draft'} <span className="hidden sm:inline">· {event.id}</span></p></div></div>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3"><span className={`status-pill hidden sm:inline-flex ${aiConfigured ? 'status-ready' : 'status-error'}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span>{sent && !running ? <button onClick={replayShowcase} className="flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold hover:bg-[var(--surface)] sm:px-3.5 sm:text-xs"><RefreshCw size={13} /> Replay <span className="hidden sm:inline">showcase</span></button> : <button disabled={!aiConfigured || sent || running} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55 sm:px-3.5 sm:text-xs">{running ? <LoaderCircle className="animate-spin" size={13} /> : <Send size={13} />}{running ? `${Math.min(completedCount + errorCount + 1, 5)} of 5` : 'Send RFx'}</button>}</div>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3"><span className={`status-pill hidden sm:inline-flex ${aiConfigured ? 'status-ready' : 'status-error'}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span>{sent && !running ? <button onClick={replayShowcase} className="flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold hover:bg-[var(--surface)] sm:px-3.5 sm:text-xs"><RefreshCw size={13} /> Replay <span className="hidden sm:inline">showcase</span></button> : <button disabled={!aiConfigured || sent || running} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55 sm:px-3.5 sm:text-xs">{running ? <LoaderCircle className="animate-spin" size={13} /> : <Send size={13} />}{running ? (runMode === 'SINGLE_VENDOR_LIVE' ? '1 live response' : `${Math.min(completedCount + errorCount + 1, 5)} of 5`) : 'Send RFx'}</button>}</div>
       </div>
       <nav className="flex gap-4 overflow-x-auto px-4 sm:gap-6 sm:px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis', 'Award'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex shrink-0 items-center gap-2 border-b-2 px-1 py-3 text-[11px] font-semibold sm:text-xs ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
     </header>
@@ -209,7 +208,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       {rateLimitUntil && rateLimitUntil > now && <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"><AlertCircle className="mt-0.5 shrink-0" size={14} /><div><p className="font-semibold">AI usage limit reached</p><p className="mt-1 leading-5">New AI requests are temporarily unavailable. Saved comparisons, attachments, recommendations, and cached analysis remain usable. Try again in about {Math.max(1, Math.ceil((rateLimitUntil - now) / 1000))} seconds.</p></div></div>}
       {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
       {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
-      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} replaying={runMode === 'SHOWCASE_REPLAY'} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} startFresh={startFreshRun} />}
+      {tab === 'Responses' && <ResponsesView event={event} sent={sent} running={running} replaying={runMode === 'SHOWCASE_REPLAY'} singleVendorLive={runMode === 'SINGLE_VENDOR_LIVE'} progress={progress} aiConfigured={aiConfigured} sendRfx={sendRfx} retry={retryVendor} startLive={startSingleVendorLive} />}
       {tab === 'Comparison' && (completedCount ? <ComparisonWorkspace /> : <EmptyTab tab="Comparison" />)}
       {tab === 'Analysis' && (completedCount ? <AnalysisWorkspace /> : <EmptyTab tab="Analysis" />)}
       {tab === 'Award' && (completedCount ? <AwardWorkspace /> : <EmptyTab tab="Award" />)}
@@ -237,17 +236,21 @@ function RfxView({ event, expanded, setExpanded, aiConfigured, sent, sendRfx }: 
   </>;
 }
 
-function ResponsesView({ event, sent, running, replaying, progress, aiConfigured, sendRfx, retry, startFresh }: { event: SourcingEvent; sent: boolean; running: boolean; replaying: boolean; progress: Record<string, VendorProgress>; aiConfigured: boolean; sendRfx: () => void; retry: (vendorId: string) => Promise<void>; startFresh: () => Promise<void> }) {
+function ResponsesView({ event, sent, running, replaying, singleVendorLive, progress, aiConfigured, sendRfx, retry, startLive }: { event: SourcingEvent; sent: boolean; running: boolean; replaying: boolean; singleVendorLive: boolean; progress: Record<string, VendorProgress>; aiConfigured: boolean; sendRfx: () => void; retry: (vendorId: string) => Promise<void>; startLive: (vendorId: string) => Promise<void> }) {
   const [attachment, setAttachment] = useState<ArtifactViewerTarget | null>(null);
+  const [livePicker, setLivePicker] = useState(false);
+  const [selectedLiveVendor, setSelectedLiveVendor] = useState('vendor-d');
+  const [startingLive, setStartingLive] = useState(false);
   if (!sent) return <div className="mx-auto flex min-h-[62vh] max-w-md items-center justify-center text-center"><div><div className="mx-auto flex size-11 items-center justify-center rounded-full border border-[var(--line)] bg-white"><Send size={18} /></div><h1 className="mt-4 text-xl font-semibold">Send the RFx to begin</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Five simulated vendor responses will arrive and be converted into comparable procurement data.</p><button disabled={!aiConfigured} onClick={sendRfx} className="mt-5 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Send RFx to 5 vendors</button></div></div>;
   const complete = Object.values(progress).filter((item) => item.state === 'COMPLETE').length;
   const errors = Object.values(progress).filter((item) => item.state === 'ERROR').length;
   return <div className="mx-auto max-w-5xl">
-    <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-xl font-semibold sm:text-2xl">{running ? (replaying ? 'Replaying the response journey' : 'Processing vendor responses') : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{running ? (replaying ? 'Using saved results only · no AI requests or tokens' : 'Responses are processed one vendor at a time and checkpointed after every successful stage.') : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="flex items-end gap-4"><button disabled={!aiConfigured || running} onClick={() => void startFresh()} className="rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold disabled:opacity-45">Start fresh live run</button><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div></div>
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Supplier responses</p><h1 className="mt-2 text-xl font-semibold sm:text-2xl">{running ? (replaying ? 'Replaying the response journey' : singleVendorLive ? 'Processing one response live' : 'Processing vendor responses') : errors ? 'Some responses need attention' : 'Responses processed'}</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{running ? (replaying ? 'Using saved results only · no AI requests or tokens' : singleVendorLive ? 'One selected vendor is using live AI. The other four retain their saved validated results.' : 'Responses are processed one vendor at a time and checkpointed after every successful stage.') : `${complete} of ${event.invitedVendors.length} responses are ready for comparison.`}</p></div><div className="flex items-end gap-4"><button disabled={!aiConfigured || running} onClick={() => setLivePicker(true)} className="rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold disabled:opacity-45">Process one response live</button><div className="text-right"><p className="text-2xl font-semibold">{complete}/{event.invitedVendors.length}</p><p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Completed</p></div></div></div>
     <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">{event.invitedVendors.map((vendor, index) => <VendorResponseRow key={vendor.id} vendor={vendor} progress={progress[vendor.id]} index={index} retry={() => retry(vendor.id)} retryDisabled={running} onView={() => setAttachment({ vendorId: vendor.id, vendorName: vendor.name, responseFormat: vendor.responseFormat })} />)}</div>
     <AuditTrail active={running} />
     <div className="mt-4 flex items-start gap-3 rounded-xl border border-[var(--line)] bg-white p-4"><ShieldCheck className="mt-0.5 shrink-0 text-[var(--green)]" size={16} /><div><p className="text-xs font-semibold">Each result remains inspectable</p><p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">Original values, normalization assumptions, exceptions, and source evidence will remain attached when these responses enter comparison.</p></div></div>
     {attachment && <ArtifactViewer target={attachment} onClose={() => setAttachment(null)} />}
+    {livePicker && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3" role="dialog" aria-modal="true" aria-label="Select one vendor for live processing" onClick={() => !startingLive && setLivePicker(false)}><section className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-6" onClick={(event) => event.stopPropagation()}><p className="eyebrow">Credit-safe live demo</p><h2 className="mt-2 text-lg font-semibold">Select one response to process live</h2><div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] leading-5 text-amber-900"><strong>Live processing uses AI credits.</strong> Only the selected vendor will be processed again. The other four will keep their previously validated results.</div><div className="mt-4 space-y-2">{event.invitedVendors.map((vendor) => <label key={vendor.id} className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 ${selectedLiveVendor === vendor.id ? 'border-[var(--ink)] bg-[var(--surface)]' : 'border-[var(--line)]'}`}><div><p className="text-xs font-semibold">{vendor.name}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{vendor.responseFormat}{['PDF', 'IMAGE'].includes(vendor.responseFormat) ? ' · uses document vision and reasoning' : ' · uses local extraction and reasoning'}</p></div><input type="radio" name="live-vendor" value={vendor.id} checked={selectedLiveVendor === vendor.id} onChange={() => setSelectedLiveVendor(vendor.id)} className="accent-[var(--ink)]" /></label>)}</div><div className="mt-5 flex justify-end gap-2"><button disabled={startingLive} onClick={() => setLivePicker(false)} className="rounded-lg border border-[var(--line-strong)] px-4 py-2.5 text-xs font-semibold disabled:opacity-50">Cancel</button><button disabled={startingLive} onClick={async () => { setStartingLive(true); try { await startLive(selectedLiveVendor); setLivePicker(false); } catch { /* Parent workspace surfaces the error and keeps this dialog open. */ } finally { setStartingLive(false); } }} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">{startingLive && <LoaderCircle className="animate-spin" size={13} />}{startingLive ? 'Starting…' : 'Process selected vendor'}</button></div></section></div>}
   </div>;
 }
 

@@ -1,7 +1,7 @@
 import 'server-only';
 import { windowsHardwareEvent } from '@/data/windows-hardware-fy27';
 import { applyClarification, getClarifications } from './clarification-manager';
-import { getDemoRun } from './run-manager';
+import { getDemoRun, getVendorCacheScope } from './run-manager';
 import { processVendorResponse } from '@/lib/ingestion/pipeline';
 import { analyzeProcurement, type AnalysisVendor } from '@/lib/procurement/analysis';
 import { getQualificationStatus } from '@/lib/procurement/qualification';
@@ -14,7 +14,7 @@ async function saveAward(award: AwardRecommendation) { await writeRuntimeDocumen
 export async function createAward() {
   const run = await getDemoRun(); if (!run) throw new Error('Process supplier responses before creating an award recommendation.');
   const clarifications = await getClarifications(); const vendors: AnalysisVendor[] = [];
-  for (const vendor of windowsHardwareEvent.invitedVendors.filter((item) => run.vendors[item.id]?.status === 'READY')) { const result = await processVendorResponse(vendor.id, undefined, undefined, { cacheScope: run.cacheScope }); const response = applyClarification(result.response, clarifications[vendor.id]); vendors.push({ id: vendor.id, name: vendor.name, qualification: getQualificationStatus(response).status, response }); }
+  for (const vendor of windowsHardwareEvent.invitedVendors.filter((item) => run.vendors[item.id]?.status === 'READY')) { const result = await processVendorResponse(vendor.id, undefined, undefined, { cacheScope: getVendorCacheScope(run, vendor.id) }); const response = applyClarification(result.response, clarifications[vendor.id]); vendors.push({ id: vendor.id, name: vendor.name, qualification: getQualificationStatus(response).status, response }); }
   const analysis = analyzeProcurement('SPLIT_AWARD_SAVINGS', windowsHardwareEvent.lineItems, vendors) as { selections: Array<AwardRecommendation['allocations'][number] | null>; splitTotal: number; cheapestSingle: { vendor: string; total: number } | null; savings: number | null };
   const allocations = analysis.selections.filter((item): item is AwardRecommendation['allocations'][number] => Boolean(item));
   const spend = new Map<string, { spend: number; lines: number }>(); for (const item of allocations) { const current = spend.get(item.vendor) ?? { spend: 0, lines: 0 }; current.spend += item.lineTotal; current.lines += 1; spend.set(item.vendor, current); }
