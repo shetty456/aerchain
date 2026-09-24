@@ -27,6 +27,8 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
   const [tab, setTab] = useState<Tab>('RFx');
   const [expanded, setExpanded] = useState<string | null>('HW-001');
   const [runStatus, setRunStatus] = useState<RunPayload['status'] | null>(null);
+  const [runStateLoaded, setRunStateLoaded] = useState(false);
+  const [runStateError, setRunStateError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, VendorProgress>>(() => initialProgress(event));
   const [actionError, setActionError] = useState<string | null>(null);
   const [runMode, setRunMode] = useState<RunPayload['mode']>();
@@ -58,8 +60,13 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       try {
         const response = await fetch('/api/demo/run', { cache: 'no-store' });
         const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Event status could not be loaded.');
         if (!disposed) applyRun(payload.run);
-      } catch { /* The empty state remains usable if status restoration fails. */ }
+      } catch (error) {
+        if (!disposed) setRunStateError(error instanceof Error ? error.message : 'Event status could not be loaded.');
+      } finally {
+        if (!disposed) setRunStateLoaded(true);
+      }
     }
     void refresh();
     return () => { disposed = true; };
@@ -128,7 +135,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
   }, [runStatus]);
 
   async function sendRfx() {
-    if (runStatus || !aiConfigured) return;
+    if (!runStateLoaded || runStateError || runStatus || !aiConfigured) return;
     setActionError(null);
     setRunStatus('RUNNING');
     setTab('Responses');
@@ -199,12 +206,15 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
   return <div className="min-h-screen bg-[var(--surface)]">
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-white/95 backdrop-blur">
       <div className="flex min-h-14 items-center justify-between gap-2 px-3 py-2 sm:px-5">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-4"><Link href="/" aria-label="Back to home" className="shrink-0 rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="hidden h-5 w-px bg-[var(--line)] sm:block" /><div className="min-w-0"><p className="truncate text-xs font-semibold tracking-tight sm:text-sm">{event.title}</p><p className="truncate text-[9px] text-[var(--muted)] sm:text-[10px]">{running ? 'Processing responses' : sent ? 'Responses received' : 'Draft'} <span className="hidden sm:inline">· {event.id}</span></p></div></div>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3"><span className={`status-pill hidden sm:inline-flex ${aiConfigured ? 'status-ready' : 'status-error'}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span>{sent && !running ? <button onClick={replayShowcase} className="flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold hover:bg-[var(--surface)] sm:px-3.5 sm:text-xs"><RefreshCw size={13} /> Replay <span className="hidden sm:inline">showcase</span></button> : <button disabled={!aiConfigured || sent || running} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55 sm:px-3.5 sm:text-xs">{running ? <LoaderCircle className="animate-spin" size={13} /> : <Send size={13} />}{running ? (runMode === 'SINGLE_VENDOR_LIVE' ? '1 live response' : `${Math.min(completedCount + errorCount + 1, 5)} of 5`) : 'Send RFx'}</button>}</div>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4"><Link href="/" aria-label="Back to home" className="shrink-0 rounded-lg p-2 hover:bg-[var(--surface)]"><ArrowLeft size={16} /></Link><div className="hidden h-5 w-px bg-[var(--line)] sm:block" /><div className="min-w-0"><p className="truncate text-xs font-semibold tracking-tight sm:text-sm">{event.title}</p><p className="truncate text-[9px] text-[var(--muted)] sm:text-[10px]">{!runStateLoaded ? 'Checking event status' : runStateError ? 'Status unavailable' : running ? 'Processing responses' : sent ? 'Responses received' : 'Draft'} <span className="hidden sm:inline">· {event.id}</span></p></div></div>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3"><span className={`status-pill hidden sm:inline-flex ${aiConfigured ? 'status-ready' : 'status-error'}`}>{aiConfigured ? 'AI providers connected' : 'AI keys required'}</span>{!runStateLoaded || runStateError ? <button disabled className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-[11px] font-semibold text-white opacity-55 sm:px-3.5 sm:text-xs">{runStateError ? <AlertCircle size={13} /> : <LoaderCircle className="animate-spin" size={13} />}{runStateError ? 'Status unavailable' : 'Checking status…'}</button> : sent && !running ? <button onClick={replayShowcase} className="flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-white px-3 py-2 text-[11px] font-semibold hover:bg-[var(--surface)] sm:px-3.5 sm:text-xs"><RefreshCw size={13} /> Replay <span className="hidden sm:inline">showcase</span></button> : <button disabled={!aiConfigured || sent || running} onClick={sendRfx} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55 sm:px-3.5 sm:text-xs">{running ? <LoaderCircle className="animate-spin" size={13} /> : <Send size={13} />}{running ? (runMode === 'SINGLE_VENDOR_LIVE' ? '1 live response' : `${Math.min(completedCount + errorCount + 1, 5)} of 5`) : 'Send RFx'}</button>}</div>
       </div>
       <nav className="flex gap-4 overflow-x-auto px-4 sm:gap-6 sm:px-6">{(['RFx', 'Responses', 'Comparison', 'Analysis', 'Award'] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`flex shrink-0 items-center gap-2 border-b-2 px-1 py-3 text-[11px] font-semibold sm:text-xs ${tab === item ? 'border-[var(--ink)] text-[var(--ink)]' : 'border-transparent text-[var(--muted)]'}`}>{item}{item === 'Responses' && sent && <span className="rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px]">{completedCount}/{event.invitedVendors.length}</span>}</button>)}</nav>
     </header>
     <main className="mx-auto max-w-[1440px] px-3 py-5 sm:px-6 sm:py-7">
+      {!runStateLoaded && <div className="flex min-h-[60vh] items-center justify-center gap-2 text-sm text-[var(--muted)]"><LoaderCircle className="animate-spin" size={16} /> Restoring sourcing event…</div>}
+      {runStateLoaded && runStateError && <div className="mx-auto flex min-h-[60vh] max-w-md items-center justify-center text-center"><div><AlertCircle className="mx-auto text-[var(--red)]" size={22} /><h1 className="mt-4 text-lg font-semibold">Event status unavailable</h1><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{runStateError} No RFx or AI action has been started.</p><button onClick={() => window.location.reload()} className="mt-5 rounded-lg border border-[var(--line-strong)] bg-white px-4 py-2.5 text-xs font-semibold">Try again</button></div></div>}
+      {runStateLoaded && !runStateError && <>
       {rateLimitUntil && rateLimitUntil > now && <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"><AlertCircle className="mt-0.5 shrink-0" size={14} /><div><p className="font-semibold">AI usage limit reached</p><p className="mt-1 leading-5">New AI requests are temporarily unavailable. Saved comparisons, attachments, recommendations, and cached analysis remain usable. Try again in about {Math.max(1, Math.ceil((rateLimitUntil - now) / 1000))} seconds.</p></div></div>}
       {actionError && <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-[#efcfcc] bg-[var(--red-soft)] px-4 py-3 text-xs text-[var(--red)]"><AlertCircle className="mt-0.5 shrink-0" size={14} />{actionError}</div>}
       {tab === 'RFx' && <RfxView event={event} expanded={expanded} setExpanded={setExpanded} aiConfigured={aiConfigured} sent={sent} sendRfx={sendRfx} />}
@@ -212,6 +222,7 @@ export default function EventWorkspace({ event, aiConfigured }: { event: Sourcin
       {tab === 'Comparison' && (completedCount ? <ComparisonWorkspace /> : <EmptyTab tab="Comparison" />)}
       {tab === 'Analysis' && (completedCount ? <AnalysisWorkspace /> : <EmptyTab tab="Analysis" />)}
       {tab === 'Award' && (completedCount ? <AwardWorkspace /> : <EmptyTab tab="Award" />)}
+      </>}
     </main>
   </div>;
 }
